@@ -16,7 +16,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
-use crate::config::{Args, MemoryPlan};
+use crate::config::{Args, LabelDensity, MemoryPlan};
 use crate::gpu::{GpuDevice, MyceliumGpu};
 use crate::memory::HostWorld;
 use crate::types::SimUniforms;
@@ -60,8 +60,11 @@ struct Runtime {
     fps: f32,
     orbit: Orbit,
     pending_pick: bool,
+    has_picked: bool,
     cursor: (f32, f32),
     shift: bool,
+    labels: LabelDensity,
+    label_fade: f32,
 }
 
 struct App {
@@ -69,6 +72,7 @@ struct App {
     plan: MemoryPlan,
     world: Option<HostWorld>,
     runtime: Option<Runtime>,
+    labels: LabelDensity,
 }
 
 fn main() -> Result<()> {
@@ -79,6 +83,7 @@ fn main() -> Result<()> {
     println!("{}", plan.describe());
 
     let world = HostWorld::commit(&plan)?;
+    let labels = args.labels;
 
     if let Some(frames) = args.bench {
         return run_bench(plan, world, frames);
@@ -90,6 +95,7 @@ fn main() -> Result<()> {
         plan,
         world: Some(world),
         runtime: None,
+        labels,
     };
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -144,6 +150,7 @@ impl ApplicationHandler<AppAction> for App {
         let plan = self.plan.clone();
         let world = self.world.take().expect("host world");
         let vsync = plan.vsync;
+        let labels = self.labels;
 
         pollster::block_on(async move {
             let instance = wgpu::Instance::new(
@@ -197,8 +204,11 @@ impl ApplicationHandler<AppAction> for App {
                     last: None,
                 },
                 pending_pick: false,
+                has_picked: false,
                 cursor: (0.5, 0.5),
                 shift: false,
+                labels,
+                label_fade: if labels == LabelDensity::Off { 0.0 } else { 1.0 },
             })));
         });
     }
@@ -218,6 +228,10 @@ impl ApplicationHandler<AppAction> for App {
                 );
                 println!("[ ] depth | ; ' thickness | , . XY field | arrows pan slab | Shift = coarse");
                 println!("Space pause | R reseed | F litter | D drift | Esc quit");
+                println!(
+                    "Tab HUD labels ({}) | hover a meter to fade English | glyphs stay",
+                    self.runtime.as_ref().map(|r| r.labels.as_str()).unwrap_or("rich")
+                );
                 println!(
                     "HUD: FPS, tips, fusions, branches, C:N | bars | then slice Z / thickness / zoom% | selected tip"
                 );
@@ -349,6 +363,11 @@ impl ApplicationHandler<AppAction> for App {
                 }
                 match logical_key {
                     Key::Named(NamedKey::Escape) => event_loop.exit(),
+                    Key::Named(NamedKey::Tab) => {
+                        rt.labels = rt.labels.cycle();
+                        println!("HUD labels: {}", rt.labels.as_str());
+                        rt.window.request_redraw();
+                    }
                     Key::Named(NamedKey::Space) => rt.paused = !rt.paused,
                     Key::Character(c) if c.eq_ignore_ascii_case("r") => {
                         rt.sim.reseed(&rt.gpu.queue, &rt.world);
@@ -379,6 +398,7 @@ impl ApplicationHandler<AppAction> for App {
             }
             WindowEvent::RedrawRequested => {
                 if rt.pending_pick {
+                    rt.has_picked = true;
                     let (eye, target) = rt.orbit.eye_target();
                     let rd = click_dir(rt.cursor, rt.config.width, rt.config.height, eye, target);
                     let vol = [
@@ -414,6 +434,15 @@ impl ApplicationHandler<AppAction> for App {
                             .texture
                             .create_view(&wgpu::TextureViewDescriptor::default());
                         let (eye, target) = rt.orbit.eye_target();
+                        let fade_target = if rt.labels == LabelDensity::Off {
+                            0.0
+                        } else {
+                            1.0
+                        };
+                        rt.label_fade += (fade_target - rt.label_fade) * 0.22;
+                        if (rt.label_fade - fade_target).abs() < 0.01 {
+                            rt.label_fade = fade_target;
+                        }
                         rt.sim.render(
                             &rt.gpu.device,
                             &rt.gpu.queue,
@@ -423,6 +452,10 @@ impl ApplicationHandler<AppAction> for App {
                             eye,
                             target,
                             rt.fps,
+                            [rt.cursor.0, rt.cursor.1],
+                            rt.labels.as_f32(),
+                            rt.label_fade,
+                            rt.has_picked,
                         );
                         rt.window.pre_present_notify();
                         rt.gpu.queue.present(frame);

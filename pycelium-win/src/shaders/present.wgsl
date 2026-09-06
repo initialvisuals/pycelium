@@ -40,6 +40,7 @@ struct PresentUniforms {
     slice_zoom: f32,
     slice_ox: f32,
     slice_oy: f32,
+    hud_ui: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> u: PresentUniforms;
@@ -140,6 +141,181 @@ fn bar(uv: vec2<f32>, origin: vec2<f32>, fill: f32, rgb: vec3<f32>) -> vec3<f32>
     return body * edge;
 }
 
+fn px() -> vec2<f32> {
+    return vec2<f32>(1.0 / max(f32(u.out_w), 1.0), 1.0 / max(f32(u.out_h), 1.0));
+}
+
+// 5×5 mono capitals. Packed row-major, bit 0 = top-left. Space = 0, A–Z = 1–26, ':' = 27.
+fn letter_bits(ch: i32) -> u32 {
+    switch ch {
+        case 1: { return 0x0118FE2Eu; }  // A
+        case 2: { return 0x00F8BE2Fu; }  // B
+        case 3: { return 0x01E0843Eu; }  // C
+        case 4: { return 0x00F8C62Fu; }  // D
+        case 5: { return 0x01F0BC3Fu; }  // E
+        case 6: { return 0x0010BC3Fu; }  // F
+        case 7: { return 0x01E8E43Eu; }  // G
+        case 8: { return 0x0118FE31u; }  // H
+        case 9: { return 0x01F2109Fu; }  // I
+        case 10: { return 0x0064A11Cu; } // J
+        case 11: { return 0x01149D31u; } // K
+        case 12: { return 0x01F08421u; } // L
+        case 13: { return 0x0118D771u; } // M
+        case 14: { return 0x011CD671u; } // N
+        case 15: { return 0x00E8C62Eu; } // O
+        case 16: { return 0x0010BE2Fu; } // P
+        case 17: { return 0x01ECC62Eu; } // Q
+        case 18: { return 0x0114BE2Fu; } // R
+        case 19: { return 0x00F8383Eu; } // S
+        case 20: { return 0x0042109Fu; } // T
+        case 21: { return 0x00E8C631u; } // U
+        case 22: { return 0x00454631u; } // V
+        case 23: { return 0x011DD631u; } // W
+        case 24: { return 0x01151151u; } // X
+        case 25: { return 0x00421151u; } // Y
+        case 26: { return 0x01F1111Fu; } // Z
+        case 27: { return 0x00020080u; } // :
+        default: { return 0u; }
+    }
+}
+
+fn letter(cell: vec2<f32>, ch: i32) -> f32 {
+    if ch <= 0 { return 0.0; }
+    let p = vec2<i32>(i32(floor(cell.x * 5.0)), i32(floor((1.0 - cell.y) * 5.0)));
+    if p.x < 0 || p.x > 4 || p.y < 0 || p.y > 4 { return 0.0; }
+    let bits = letter_bits(ch);
+    let bit = u32(p.y * 5 + p.x);
+    return f32((bits >> bit) & 1u);
+}
+
+// Short English names for the left HUD. -1 terminates a string of at most 8 glyphs.
+fn label_char(id: i32, slot: i32) -> i32 {
+    switch id {
+        case 0: { // FPS
+            switch slot { case 0: { return 6; } case 1: { return 16; } case 2: { return 19; } default: { return -1; } }
+        }
+        case 1: { // TIPS
+            switch slot { case 0: { return 20; } case 1: { return 9; } case 2: { return 16; } case 3: { return 19; } default: { return -1; } }
+        }
+        case 2: { // FUSIONS
+            switch slot { case 0: { return 6; } case 1: { return 21; } case 2: { return 19; } case 3: { return 9; } case 4: { return 15; } case 5: { return 14; } case 6: { return 19; } default: { return -1; } }
+        }
+        case 3: { // BRANCHES
+            switch slot { case 0: { return 2; } case 1: { return 18; } case 2: { return 1; } case 3: { return 14; } case 4: { return 3; } case 5: { return 8; } case 6: { return 5; } case 7: { return 19; } default: { return -1; } }
+        }
+        case 4: { // C:N
+            switch slot { case 0: { return 3; } case 1: { return 27; } case 2: { return 14; } default: { return -1; } }
+        }
+        case 5: { // HYPHA
+            switch slot { case 0: { return 8; } case 1: { return 25; } case 2: { return 16; } case 3: { return 8; } case 4: { return 1; } default: { return -1; } }
+        }
+        case 6: { // CORD
+            switch slot { case 0: { return 3; } case 1: { return 15; } case 2: { return 18; } case 3: { return 4; } default: { return -1; } }
+        }
+        case 7: { // SOL C
+            switch slot { case 0: { return 19; } case 1: { return 15; } case 2: { return 12; } case 3: { return 0; } case 4: { return 3; } default: { return -1; } }
+        }
+        case 8: { // SOL N
+            switch slot { case 0: { return 19; } case 1: { return 15; } case 2: { return 12; } case 3: { return 0; } case 4: { return 14; } default: { return -1; } }
+        }
+        case 9: { // ENZYME
+            switch slot { case 0: { return 5; } case 1: { return 14; } case 2: { return 26; } case 3: { return 25; } case 4: { return 13; } case 5: { return 5; } default: { return -1; } }
+        }
+        case 10: { // ORGANIC
+            switch slot { case 0: { return 15; } case 1: { return 18; } case 2: { return 7; } case 3: { return 1; } case 4: { return 14; } case 5: { return 9; } case 6: { return 3; } default: { return -1; } }
+        }
+        case 11: { // SLICE Z
+            switch slot { case 0: { return 19; } case 1: { return 12; } case 2: { return 9; } case 3: { return 3; } case 4: { return 5; } case 5: { return 0; } case 6: { return 26; } default: { return -1; } }
+        }
+        case 12: { // THICK
+            switch slot { case 0: { return 20; } case 1: { return 8; } case 2: { return 9; } case 3: { return 3; } case 4: { return 11; } default: { return -1; } }
+        }
+        case 13: { // ZOOM
+            switch slot { case 0: { return 26; } case 1: { return 15; } case 2: { return 15; } case 3: { return 13; } default: { return -1; } }
+        }
+        case 14: { // TIP
+            switch slot { case 0: { return 20; } case 1: { return 9; } case 2: { return 16; } default: { return -1; } }
+        }
+        case 15: { // LINEAGE
+            switch slot { case 0: { return 12; } case 1: { return 9; } case 2: { return 14; } case 3: { return 5; } case 4: { return 1; } case 5: { return 7; } case 6: { return 5; } default: { return -1; } }
+        }
+        case 16: { // AGE
+            switch slot { case 0: { return 1; } case 1: { return 7; } case 2: { return 5; } default: { return -1; } }
+        }
+        case 17: { // RESERVE
+            switch slot { case 0: { return 18; } case 1: { return 5; } case 2: { return 19; } case 3: { return 5; } case 4: { return 18; } case 5: { return 22; } case 6: { return 5; } default: { return -1; } }
+        }
+        case 18: { // PARAM
+            switch slot { case 0: { return 16; } case 1: { return 1; } case 2: { return 18; } case 3: { return 1; } case 4: { return 13; } default: { return -1; } }
+        }
+        default: { return -1; }
+    }
+}
+
+fn draw_label(uv: vec2<f32>, origin: vec2<f32>, id: i32) -> f32 {
+    let n = 8.0;
+    let local = (uv - origin) / vec2<f32>(0.0075 * n, 0.014);
+    if local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0 {
+        return 0.0;
+    }
+    let slot = i32(floor(local.x * n));
+    let cell = vec2<f32>(fract(local.x * n), local.y);
+    let ch = label_char(id, slot);
+    if ch < 0 { return 0.0; }
+    return letter(cell, ch);
+}
+
+fn thin_frame(uv: vec2<f32>, r0: vec2<f32>, r1: vec2<f32>) -> f32 {
+    let p = px();
+    let inside = uv.x >= r0.x && uv.x <= r1.x && uv.y >= r0.y && uv.y <= r1.y;
+    let inner = uv.x >= r0.x + p.x && uv.x <= r1.x - p.x && uv.y >= r0.y + p.y && uv.y <= r1.y - p.y;
+    return select(0.0, 1.0, inside && !inner);
+}
+
+fn elbow(uv: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let p = px();
+    let h = abs(uv.y - a.y) <= p.y && uv.x >= min(a.x, b.x) && uv.x <= max(a.x, b.x);
+    let v = abs(uv.x - b.x) <= p.x && uv.y >= min(a.y, b.y) && uv.y <= max(a.y, b.y);
+    return select(0.0, 1.0, h || v);
+}
+
+fn row_alpha(cursor: vec2<f32>, y0: f32, y1: f32, density: f32, fade: f32, picked: bool) -> f32 {
+    if density < 0.5 || fade <= 0.0 {
+        return 0.0;
+    }
+    let in_panel = cursor.x < 0.26;
+    let mid = 0.5 * (y0 + y1);
+    let half = max(0.5 * (y1 - y0), 0.012);
+    let dy = abs(cursor.y - mid);
+    var hover = 0.0;
+    if in_panel {
+        hover = 1.0 - smoothstep(half, half + 0.028, dy);
+    }
+    let base = select(0.0, 0.32, density > 1.5);
+    let focus = select(base, max(base, 0.82), picked);
+    return clamp(max(focus, hover), 0.0, 1.0) * fade;
+}
+
+fn paint_label(uv: vec2<f32>, origin: vec2<f32>, id: i32, alpha: f32, rgb: vec3<f32>) -> vec3<f32> {
+    if alpha <= 0.004 {
+        return rgb;
+    }
+    let shadow = draw_label(uv, origin + px() * 2.0, id);
+    let ink = draw_label(uv, origin, id);
+    var out = rgb;
+    out = mix(out, vec3<f32>(0.0, 0.0, 0.0), shadow * alpha * 0.55);
+    out = mix(out, vec3<f32>(0.94, 0.95, 0.92), ink * alpha);
+    return out;
+}
+
+fn paint_callout(uv: vec2<f32>, src: vec2<f32>, dst: vec2<f32>, alpha: f32, rgb: vec3<f32>) -> vec3<f32> {
+    if alpha < 0.55 {
+        return rgb;
+    }
+    let line = elbow(uv, src, dst);
+    return mix(rgb, vec3<f32>(0.86, 0.88, 0.84), line * (alpha - 0.55) * 0.9);
+}
+
 @fragment
 fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let res = vec2<f32>(f32(u.out_w), f32(u.out_h));
@@ -215,7 +391,8 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         rgb = mix(srgb, vec3<f32>(0.8, 0.8, 0.75), frame);
     }
 
-    // Telemetry panel.
+    // Telemetry panel. 3×5 glyphs stay; English is a fade-in overlay.
+    // Row map: docs/HUD_LEGEND.md
     if uv.x < 0.24 {
         rgb = mix(rgb, vec3<f32>(0.03, 0.035, 0.04), 0.78);
         var ink = 0.0;
@@ -256,6 +433,77 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         rgb = rgb + bar(uv, vec2<f32>(0.03, 0.44), f32(hud[7]) / 25000.0, vec3<f32>(0.55, 0.40, 0.85));
         rgb = rgb + bar(uv, vec2<f32>(0.03, 0.48), f32(hud[8]) / 20000.0, vec3<f32>(0.32, 0.70, 0.34));
         rgb = rgb + bar(uv, vec2<f32>(0.03, 0.52), f32(hud[9]) / 50000.0, vec3<f32>(0.45, 0.32, 0.18));
+
+        let cursor = u.hud_ui.xy;
+        let density = u.hud_ui.z;
+        let fade = clamp(u.hud_ui.w, 0.0, 1.0);
+        let picked = sid < 20000000u && u.selected_id > 0.0;
+        let chrome = row_alpha(cursor, 0.04, 0.96, density, fade, false) * 0.55;
+        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.048), vec2<f32>(0.232, 0.288)) * chrome);
+        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.300), vec2<f32>(0.232, 0.548)) * chrome);
+        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.548), vec2<f32>(0.232, 0.682)) * chrome);
+        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.688), vec2<f32>(0.232, 0.862)) * chrome);
+        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.878), vec2<f32>(0.232, 0.938)) * chrome);
+
+        let a0 = row_alpha(cursor, 0.050, 0.100, density, fade, false);
+        let a1 = row_alpha(cursor, 0.105, 0.150, density, fade, false);
+        let a2 = row_alpha(cursor, 0.150, 0.185, density, fade, false);
+        let a3 = row_alpha(cursor, 0.185, 0.225, density, fade, false);
+        let a4 = row_alpha(cursor, 0.225, 0.280, density, fade, false);
+        let a5 = row_alpha(cursor, 0.305, 0.345, density, fade, false);
+        let a6 = row_alpha(cursor, 0.345, 0.385, density, fade, false);
+        let a7 = row_alpha(cursor, 0.385, 0.425, density, fade, false);
+        let a8 = row_alpha(cursor, 0.425, 0.465, density, fade, false);
+        let a9 = row_alpha(cursor, 0.465, 0.505, density, fade, false);
+        let a10 = row_alpha(cursor, 0.505, 0.545, density, fade, false);
+        let a11 = row_alpha(cursor, 0.545, 0.585, density, fade, false);
+        let a12 = row_alpha(cursor, 0.585, 0.625, density, fade, false);
+        let a13 = row_alpha(cursor, 0.625, 0.675, density, fade, false);
+        let a14 = row_alpha(cursor, 0.675, 0.725, density, fade, picked);
+        let a15 = row_alpha(cursor, 0.725, 0.765, density, fade, picked);
+        let a16 = row_alpha(cursor, 0.765, 0.805, density, fade, picked);
+        let a17 = row_alpha(cursor, 0.805, 0.855, density, fade, picked);
+        let a18 = row_alpha(cursor, 0.855, 0.940, density, fade, false);
+
+        rgb = paint_label(uv, vec2<f32>(0.068, 0.067), 0, a0, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.112, 0.127), 1, a1, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.098, 0.167), 2, a2, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.098, 0.207), 3, a3, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.084, 0.247), 4, a4, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.304), 5, a5, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.344), 6, a6, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.384), 7, a7, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.424), 8, a8, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.464), 9, a9, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.504), 10, a10, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.084, 0.567), 11, a11, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.070, 0.607), 12, a12, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.070, 0.647), 13, a13, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.112, 0.707), 14, a14, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.070, 0.747), 15, a15, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.098, 0.787), 16, a16, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.084, 0.827), 17, a17, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.118, 0.907), 18, a18, rgb);
+
+        rgb = paint_callout(uv, vec2<f32>(0.062, 0.074), vec2<f32>(0.066, 0.074), a0, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.104, 0.134), vec2<f32>(0.110, 0.134), a1, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.090, 0.174), vec2<f32>(0.096, 0.174), a2, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.090, 0.214), vec2<f32>(0.096, 0.214), a3, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.076, 0.254), vec2<f32>(0.082, 0.254), a4, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.028, 0.328), vec2<f32>(0.028, 0.311), a5, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.028, 0.368), vec2<f32>(0.028, 0.351), a6, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.028, 0.408), vec2<f32>(0.028, 0.391), a7, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.028, 0.448), vec2<f32>(0.028, 0.431), a8, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.028, 0.488), vec2<f32>(0.028, 0.471), a9, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.028, 0.528), vec2<f32>(0.028, 0.511), a10, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.076, 0.574), vec2<f32>(0.082, 0.574), a11, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.062, 0.614), vec2<f32>(0.068, 0.614), a12, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.062, 0.654), vec2<f32>(0.068, 0.654), a13, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.104, 0.714), vec2<f32>(0.110, 0.714), a14, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.062, 0.754), vec2<f32>(0.068, 0.754), a15, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.090, 0.794), vec2<f32>(0.096, 0.794), a16, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.076, 0.834), vec2<f32>(0.082, 0.834), a17, rgb);
+        rgb = paint_callout(uv, vec2<f32>(0.108, 0.914), vec2<f32>(0.116, 0.914), a18, rgb);
     }
 
     return vec4<f32>(rgb, 1.0);

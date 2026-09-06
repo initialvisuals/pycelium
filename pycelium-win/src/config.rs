@@ -53,6 +53,49 @@ pub struct Args {
 
     #[arg(long)]
     pub bench: Option<u32>,
+
+    /// English HUD label density. Tab cycles rich → sparse → off at runtime.
+    #[arg(long, value_enum, default_value_t = LabelDensity::Rich)]
+    pub labels: LabelDensity,
+}
+
+/// How loudly the left telemetry HUD speaks English.
+/// Cryptic 3×5 glyphs stay visible in every mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum LabelDensity {
+    /// All meter names at low opacity; hover / pick fades them up.
+    #[default]
+    Rich,
+    /// Names only on hover, pick, or the focused param row.
+    Sparse,
+    /// Glyphs and bars only.
+    Off,
+}
+
+impl LabelDensity {
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Rich => Self::Sparse,
+            Self::Sparse => Self::Off,
+            Self::Off => Self::Rich,
+        }
+    }
+
+    pub fn as_f32(self) -> f32 {
+        match self {
+            Self::Off => 0.0,
+            Self::Sparse => 1.0,
+            Self::Rich => 2.0,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rich => "rich",
+            Self::Sparse => "sparse",
+            Self::Off => "off",
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -172,6 +215,7 @@ fn soil_bytes(width: u32, height: u32, layers: u32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
     #[test]
     fn beast_plan_is_large() {
@@ -186,10 +230,52 @@ mod tests {
             vsync: false,
             drift: false,
             bench: None,
+            labels: LabelDensity::Rich,
         };
         let plan = MemoryPlan::from_args(&args);
         assert!(plan.estimated_host_bytes > 1024 * 1024);
         assert!(plan.soil_width >= plan.gpu_width);
         assert!(plan.gpu_depth >= 32);
+        assert_eq!(args.labels, LabelDensity::Rich);
+    }
+
+    #[test]
+    fn labels_flag_does_not_change_performant_plan() {
+        let off = Args::try_parse_from(["pycelium-win", "--labels", "off"]).expect("parse");
+        let def = Args::try_parse_from(["pycelium-win"]).expect("parse");
+        let a = MemoryPlan::from_args(&off);
+        let b = MemoryPlan::from_args(&def);
+        assert_eq!(a.gpu_width, b.gpu_width);
+        assert_eq!(a.gpu_agents, b.gpu_agents);
+        assert_eq!(a.gpu_depth, b.gpu_depth);
+        assert_eq!(off.labels, LabelDensity::Off);
+        assert_eq!(def.labels, LabelDensity::Rich);
+        assert!(matches!(def.preset, Preset::Performant));
+    }
+
+    #[test]
+    fn label_density_cycles_and_keeps_presets_untouched() {
+        assert_eq!(LabelDensity::Rich.cycle(), LabelDensity::Sparse);
+        assert_eq!(LabelDensity::Sparse.cycle(), LabelDensity::Off);
+        assert_eq!(LabelDensity::Off.cycle(), LabelDensity::Rich);
+        assert_eq!(LabelDensity::Off.as_f32(), 0.0);
+        assert_eq!(LabelDensity::Sparse.as_f32(), 1.0);
+        assert_eq!(LabelDensity::Rich.as_f32(), 2.0);
+        let beast = Args {
+            preset: Preset::Beast,
+            ram_gb: None,
+            resolution: None,
+            depth: None,
+            agents: None,
+            food: 28,
+            steps: 1,
+            vsync: false,
+            drift: false,
+            bench: None,
+            labels: LabelDensity::Off,
+        };
+        let plan = MemoryPlan::from_args(&beast);
+        assert!(plan.gpu_agents >= 1_000);
+        assert_eq!(beast.labels, LabelDensity::Off);
     }
 }

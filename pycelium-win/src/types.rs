@@ -186,6 +186,8 @@ pub struct PresentUniforms {
     pub slice_zoom: f32,
     pub slice_ox: f32,
     pub slice_oy: f32,
+    /// xy = cursor UV, z = label density (0 off / 1 sparse / 2 rich), w = fade 0..1
+    pub hud_ui: [f32; 4],
 }
 
 /// Orthogonal section through the pedon. Depth is the plane; thickness is
@@ -237,3 +239,14 @@ impl SliceView {
 }
 
 pub const TEL_COUNT: usize = 16;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn present_uniforms_stay_16_byte_aligned() {
+        assert_eq!(std::mem::size_of::<PresentUniforms>() % 16, 0);
+        assert!(std::mem::size_of::<PresentUniforms>() >= 160);
+    }
+}

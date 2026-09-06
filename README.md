@@ -21,11 +21,23 @@ python pycelium.py
 | `●` | Fungal growth head |
 | `◍` | Food source |
 
+### GPU mesocosm (`pycelium-win`)
+
+Windows / wgpu 3D pedon. Left telemetry HUD keeps the cryptic **3×5 bitmap digits** and fades in short English names (rich density by default; **Tab** cycles rich / sparse / off). Legend: [docs/HUD_LEGEND.md](docs/HUD_LEGEND.md).
+
+```bash
+cargo run -p pycelium-win --release -- --preset demo
+# Tab: label density    hover a meter to focus    --labels sparse|off
+# --bench N is headless and does not open the HUD
+```
+
 ### Files
 
 | Path | What |
 |------|------|
-| `pycelium.py` | Simulator |
+| `pycelium.py` | CLI toy |
+| `pycelium-win/` | GPU mesocosm + telemetry HUD |
+| `docs/HUD_LEGEND.md` | Left HUD map (glyphs + English) |
 | `README.rst` | Original short readme |
 | `LICENSE` | License |
 

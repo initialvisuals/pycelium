@@ -20,3 +20,6 @@ rand = "0.8"
 rayon = "1.10"
 wgpu = "30"
 winit = "0.30"
+
+[dev-dependencies]
+naga = { version = "30.0.1", default-features = false, features = ["wgsl-in"] }

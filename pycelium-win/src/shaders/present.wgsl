@@ -308,11 +308,11 @@ fn paint_label(uv: vec2<f32>, origin: vec2<f32>, id: i32, alpha: f32, rgb: vec3<
     return out;
 }
 
-fn paint_callout(uv: vec2<f32>, from: vec2<f32>, to: vec2<f32>, alpha: f32, rgb: vec3<f32>) -> vec3<f32> {
+fn paint_callout(uv: vec2<f32>, src: vec2<f32>, dst: vec2<f32>, alpha: f32, rgb: vec3<f32>) -> vec3<f32> {
     if alpha < 0.55 {
         return rgb;
     }
-    let line = elbow(uv, from, to);
+    let line = elbow(uv, src, dst);
     return mix(rgb, vec3<f32>(0.86, 0.88, 0.84), line * (alpha - 0.55) * 0.9);
 }
 

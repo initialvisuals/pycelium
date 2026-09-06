@@ -250,7 +250,7 @@ mod tests {
         assert_eq!(a.gpu_depth, b.gpu_depth);
         assert_eq!(off.labels, LabelDensity::Off);
         assert_eq!(def.labels, LabelDensity::Rich);
-        assert_eq!(def.preset, Preset::Performant);
+        assert!(matches!(def.preset, Preset::Performant));
     }
 
     #[test]

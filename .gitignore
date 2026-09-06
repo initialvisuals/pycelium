@@ -63,6 +63,14 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# Rust
+/target/
+**/*.rs.bk
+
+# Experiment artifacts
+*.pgm
+/artifacts/
+
 # PyBuilder
 target/
 

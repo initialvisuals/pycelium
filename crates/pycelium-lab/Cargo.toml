@@ -1,0 +1,12 @@
+[package]
+name = "pycelium-lab"
+description = "Experiment harness and 2D slice views for the Pycelium sim lab."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+pycelium-core.workspace = true
+clap.workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "pycelium-core"
+description = "Dense 2D mycelium / growth simulation core (CPU-first, GPU later)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+rand.workspace = true

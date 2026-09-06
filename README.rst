@@ -1,7 +1,7 @@
 Pycelium
 ========================
-A simple CLI mycelium simulator.
+Simulator / idea lab (PC-2D primary). See README.md.
 
-Just run with "python pycelium.py"
----------------
+Legacy CLI toy::
 
+    python pycelium.py

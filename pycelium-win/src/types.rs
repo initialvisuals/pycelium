@@ -72,6 +72,14 @@ pub struct SimUniforms {
     pub pick_dy: f32,
     pub pick_dz: f32,
     pub pad2: f32,
+    pub brush_x: f32,
+    pub brush_y: f32,
+    pub brush_z: f32,
+    pub brush_radius: f32,
+    pub brush_strength: f32,
+    pub brush_channel: f32,
+    pub brush_mode: f32,
+    pub brush_lineage: f32,
 }
 
 impl SimUniforms {
@@ -109,6 +117,14 @@ impl SimUniforms {
             pick_dy: 0.0,
             pick_dz: 1.0,
             pad2: 0.0,
+            brush_x: 0.0,
+            brush_y: 0.0,
+            brush_z: 0.0,
+            brush_radius: 5.0,
+            brush_strength: 0.55,
+            brush_channel: 0.0,
+            brush_mode: 0.0,
+            brush_lineage: 1.0,
         }
     }
 
@@ -246,6 +262,11 @@ pub struct PresentUniforms {
     pub nudge_rect: [f32; 4],
     /// Normalized 0..1 fills for the eight left-HUD param sliders.
     pub param_fills: [f32; 8],
+    /// Tool strip: x = mode (0 view / 1 specimen / 2 paint), y = species 0..7,
+    /// z = paint channel 0..7, w = brush radius in voxels.
+    pub brush_ui: [f32; 4],
+    /// Cursor volume hit for the brush ghost: xyz unit-cube, w = 1 when armed.
+    pub brush_hit: [f32; 4],
 }
 
 /// Orthogonal section through the pedon. Depth is the plane; thickness is
@@ -339,7 +360,8 @@ mod tests {
     fn present_uniforms_stay_16_byte_aligned() {
         assert_eq!(std::mem::size_of::<PresentUniforms>() % 16, 0);
         assert!(std::mem::size_of::<PresentUniforms>() >= 176);
-        assert_eq!(std::mem::size_of::<PresentUniforms>(), 16 * 19);
+        assert_eq!(std::mem::size_of::<PresentUniforms>(), 16 * 21);
+        assert_eq!(std::mem::size_of::<SimUniforms>() % 16, 0);
     }
 
     #[test]

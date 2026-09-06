@@ -14,6 +14,7 @@
 //!    (conductance √(ρᵢρⱼ)). Tips are sinks; food is a source.
 //!
 //! Inoculum is a handful of germ tubes. Time, not particle count, fills the dish.
+//! Painted specimens (`Tip.flags = 2`, lineage 1–8) reuse this tip pool; see `species.rs`.
 
 pub const GERM_TUBES_PER_SPORE: u32 = 72;
 pub const INOCULUM_SITES: u32 = 5;

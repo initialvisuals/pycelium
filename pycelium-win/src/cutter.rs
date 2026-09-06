@@ -43,14 +43,6 @@ impl Axis {
         }
     }
 
-    pub fn from_index(i: i32) -> Self {
-        match i.rem_euclid(3) {
-            0 => Self::X,
-            1 => Self::Y,
-            _ => Self::Z,
-        }
-    }
-
     pub fn size(self, w: u32, h: u32, d: u32) -> u32 {
         match self {
             Self::X => w,
@@ -519,7 +511,7 @@ mod tests {
     fn slider_handles_thicken_from_one_layer() {
         let mut c = Cutter::new(100);
         c.enter(50.0, 100);
-        assert_eq!(c.hit_handle((0.50, 0.93), 100.0), None);
+        // One-layer handles sit on the cursor; grabbing either starts the thicken.
         let hn = c.half_norm(100.0);
         let x_neg = SLIDER_X0 + (c.pos - hn) * (SLIDER_X1 - SLIDER_X0);
         assert_eq!(c.hit_handle((x_neg, 0.93), 100.0), Some(Handle::Neg));
@@ -528,6 +520,8 @@ mod tests {
         c.drag_handle((x_wide, 0.93), 100.0);
         assert!((c.half_vox - 10.0).abs() < 0.6);
         assert!(c.thickness_voxels() > 8.0);
+        let x_far = SLIDER_X0 + 0.02 * (SLIDER_X1 - SLIDER_X0);
+        assert_eq!(c.hit_handle((x_far, 0.93), 100.0), None);
     }
 
     #[test]

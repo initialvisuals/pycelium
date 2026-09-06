@@ -607,8 +607,8 @@ fn read_f32_buffer(
         .poll(wgpu::PollType::wait_indefinitely())
         .context("poll slice readback")?;
     rx.recv().context("readback callback")??;
-    let data = slice.get_mapped_range();
-    let floats = bytemuck::cast_slice(&data).to_vec();
+    let data = slice.get_mapped_range().context("map slice range")?;
+    let floats = bytemuck::cast_slice(data.as_ref()).to_vec();
     drop(data);
     staging.unmap();
     Ok(floats)

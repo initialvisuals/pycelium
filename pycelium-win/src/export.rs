@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use image::{GrayImage, ImageBuffer, Rgba, RgbaImage};
 use serde::Serialize;
 
 use crate::cutter::{Axis, CaptureMode, Cutter};
@@ -54,9 +53,7 @@ pub struct SlicePlane {
     pub hi: i32,
     pub biomass: Vec<f32>,
     pub soluble: Vec<f32>,
-    /// Depth of the strongest sample along the cutter axis, in voxels.
-    pub peak_depth: Vec<f32>,
-    /// Coordinate of that sample along the heightmap axis, normalized 0..1.
+    /// Coordinate of the strongest sample along the heightmap axis, normalized 0..1.
     pub height_along: Vec<f32>,
     pub volume_samples: Vec<OccupiedSample>,
 }
@@ -133,16 +130,14 @@ pub fn extract_slice(
     let height = v_axis.size(vol.width, vol.height, vol.depth);
     let axis_n = axis.size(vol.width, vol.height, vol.depth) as f32;
     let center = cutter.pos * axis_n;
-    let half = cutter.half_vox.max(0.5);
-    let lo = (center - half).floor() as i32;
-    let hi = (center + half).ceil() as i32;
-    let lo = lo.max(0);
-    let hi = hi.min(axis_n as i32 - 1).max(lo);
+    let n_layers = cutter.thickness_voxels().round().max(1.0) as i32;
+    let mid = center.round() as i32;
+    let lo = (mid - (n_layers - 1) / 2).max(0);
+    let hi = (lo + n_layers - 1).min(axis_n as i32 - 1).max(lo);
 
     let n = (width as usize).saturating_mul(height as usize);
     let mut biomass = vec![0.0f32; n];
     let mut soluble = vec![0.0f32; n];
-    let mut peak_depth = vec![center; n];
     let mut height_along = vec![0.0f32; n];
     let mut volume_samples = Vec::new();
     let keep_volume = include_volume || cutter.mode == CaptureMode::RichBox;
@@ -153,7 +148,6 @@ pub fn extract_slice(
             let i = (v * width + u) as usize;
             let mut best = 0.0f32;
             let mut best_sol = 0.0f32;
-            let mut best_t = center;
             let mut best_h = 0.0f32;
             for t in lo..=hi {
                 let (x, y, z) = voxel_at(axis, u, v, t);
@@ -169,7 +163,6 @@ pub fn extract_slice(
                 if b >= best {
                     best = b;
                     best_sol = s;
-                    best_t = t as f32;
                     let p = [
                         x as f32 / vol.width.max(1) as f32,
                         y as f32 / vol.height.max(1) as f32,
@@ -184,7 +177,6 @@ pub fn extract_slice(
             }
             biomass[i] = best;
             soluble[i] = best_sol;
-            peak_depth[i] = best_t;
             height_along[i] = best_h;
         }
     }
@@ -200,7 +192,6 @@ pub fn extract_slice(
         hi,
         biomass,
         soluble,
-        peak_depth,
         height_along,
         volume_samples,
     }
@@ -298,7 +289,7 @@ fn civil_from_unix(secs: u64) -> (i32, u32, u32, u32, u32, u32) {
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
     let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = mp + if mp < 10 { 3 } else { -9 };
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = y + if m <= 2 { 1 } else { 0 };
     let rem = secs % 86400;
     (
@@ -312,49 +303,66 @@ fn civil_from_unix(secs: u64) -> (i32, u32, u32, u32, u32, u32) {
 }
 
 fn write_density_png(path: &Path, plane: &SlicePlane) -> Result<()> {
-    let mut img: RgbaImage = ImageBuffer::new(plane.width, plane.height);
+    let mut rgba = vec![0u8; (plane.width * plane.height * 4) as usize];
     for v in 0..plane.height {
         for u in 0..plane.width {
             let i = (v * plane.width + u) as usize;
             let hy = 1.0 - (-plane.biomass[i] * 3.0).exp();
             let food = 1.0 - (-plane.soluble[i] * 3.2).exp();
-            let r = ((0.04 + 0.58 * hy + 0.70 * food) * 255.0).clamp(0.0, 255.0) as u8;
-            let g = ((0.045 + 0.90 * hy + 0.28 * food) * 255.0).clamp(0.0, 255.0) as u8;
-            let b = ((0.05 + 0.80 * hy + 0.06 * food) * 255.0).clamp(0.0, 255.0) as u8;
-            img.put_pixel(u, v, Rgba([r, g, b, 255]));
+            let o = i * 4;
+            rgba[o] = ((0.04 + 0.58 * hy + 0.70 * food) * 255.0).clamp(0.0, 255.0) as u8;
+            rgba[o + 1] = ((0.045 + 0.90 * hy + 0.28 * food) * 255.0).clamp(0.0, 255.0) as u8;
+            rgba[o + 2] = ((0.05 + 0.80 * hy + 0.06 * food) * 255.0).clamp(0.0, 255.0) as u8;
+            rgba[o + 3] = 255;
         }
     }
-    img.save(path).with_context(|| format!("write {}", path.display()))
+    write_png(path, plane.width, plane.height, png::ColorType::Rgba, &rgba)
 }
 
 fn write_mask_png(path: &Path, plane: &SlicePlane) -> Result<()> {
     let max_b = plane.biomass.iter().copied().fold(0.0f32, f32::max).max(1e-6);
-    let mut img = GrayImage::new(plane.width, plane.height);
-    for v in 0..plane.height {
-        for u in 0..plane.width {
-            let i = (v * plane.width + u) as usize;
-            let q = ((plane.biomass[i] / max_b) * 255.0).clamp(0.0, 255.0) as u8;
-            img.put_pixel(u, v, image::Luma([q]));
-        }
+    let mut gray = vec![0u8; (plane.width * plane.height) as usize];
+    for (i, &b) in plane.biomass.iter().enumerate() {
+        gray[i] = ((b / max_b) * 255.0).clamp(0.0, 255.0) as u8;
     }
-    img.save(path).with_context(|| format!("write {}", path.display()))
+    write_png(path, plane.width, plane.height, png::ColorType::Grayscale, &gray)
 }
 
 fn write_height_png(path: &Path, plane: &SlicePlane) -> Result<()> {
     let stats = plane_stats(plane);
-    let mut img = GrayImage::new(plane.width, plane.height);
-    for v in 0..plane.height {
-        for u in 0..plane.width {
-            let i = (v * plane.width + u) as usize;
-            let q = if plane.biomass[i] > stats.threshold {
-                (plane.height_along[i] * 255.0).clamp(0.0, 255.0) as u8
-            } else {
-                0
-            };
-            img.put_pixel(u, v, image::Luma([q]));
-        }
+    let mut gray = vec![0u8; (plane.width * plane.height) as usize];
+    for (i, &b) in plane.biomass.iter().enumerate() {
+        gray[i] = if b > stats.threshold {
+            (plane.height_along[i] * 255.0).clamp(0.0, 255.0) as u8
+        } else {
+            0
+        };
     }
-    img.save(path).with_context(|| format!("write {}", path.display()))
+    write_png(path, plane.width, plane.height, png::ColorType::Grayscale, &gray)
+}
+
+fn write_png(
+    path: &Path,
+    width: u32,
+    height: u32,
+    color: png::ColorType,
+    data: &[u8],
+) -> Result<()> {
+    let file = fs::File::create(path).with_context(|| format!("write {}", path.display()))?;
+    let mut encoder = png::Encoder::new(file, width, height);
+    encoder.set_color(color);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().context("png header")?;
+    writer.write_image_data(data).context("png pixels")?;
+    Ok(())
+}
+
+fn png_size(path: &Path) -> Result<(u32, u32)> {
+    let file = fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let decoder = png::Decoder::new(file);
+    let reader = decoder.read_info().context("png info")?;
+    let info = reader.info();
+    Ok((info.width, info.height))
 }
 
 fn write_json(
@@ -538,6 +546,7 @@ mod tests {
         let plane = extract_slice(&vol, &c, false);
         assert_eq!(plane.width, 8);
         assert_eq!(plane.height, 8);
+        assert_eq!(plane.axis, Axis::Z);
         assert_eq!(plane.u_axis, Axis::X);
         assert_eq!(plane.v_axis, Axis::Y);
         let i = (4 * 8 + 3) as usize;
@@ -637,9 +646,8 @@ mod tests {
         assert!(json.contains("\"axis\": \"z\""));
         let svg = fs::read_to_string(&paths.svg).unwrap();
         assert!(svg.contains("<svg"));
-        let img = image::open(&paths.png).unwrap();
-        assert_eq!(img.width(), 8);
-        assert_eq!(img.height(), 8);
+        let (pw, ph) = png_size(&paths.png).unwrap();
+        assert_eq!((pw, ph), (8, 8));
         let _ = fs::remove_dir_all(&dir);
     }
 

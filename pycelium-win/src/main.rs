@@ -1,6 +1,7 @@
 mod config;
 mod cutter;
 mod export;
+mod export_settings;
 mod gpu;
 mod hud_font;
 mod memory;
@@ -22,7 +23,8 @@ use winit::window::{Window, WindowId};
 
 use crate::config::{Args, LabelDensity, MemoryPlan};
 use crate::cutter::Cutter;
-use crate::export::{extract_slice, utc_stamp, write_exports};
+use crate::export::{apply_export_layout, extract_slice, utc_stamp, write_exports_with_meta};
+use crate::export_settings::ExportSettings;
 use crate::gpu::{GpuDevice, MyceliumGpu};
 use crate::memory::HostWorld;
 use crate::types::SimUniforms;
@@ -72,6 +74,7 @@ struct Runtime {
     labels: LabelDensity,
     label_fade: f32,
     cutter: Cutter,
+    export: ExportSettings,
     export_dir: PathBuf,
 }
 
@@ -223,6 +226,7 @@ impl ApplicationHandler<AppAction> for App {
                 labels,
                 label_fade: if labels == LabelDensity::Off { 0.0 } else { 1.0 },
                 cutter: Cutter::new(cutter_depth),
+                export: ExportSettings::default(),
                 export_dir,
             })));
         });
@@ -248,7 +252,7 @@ impl ApplicationHandler<AppAction> for App {
                     self.runtime.as_ref().map(|r| r.labels.as_str()).unwrap_or("rich")
                 );
                 println!(
-                    "E capture | C 2D/rich | hover cube face to snap | drag slider handles | Enter export | Esc leave"
+                    "E capture | C 2D/rich | S export settings | hover cube face to snap | drag slider handles | Enter export | Esc leave"
                 );
                 println!(
                     "HUD: FPS, tips, fusions, branches, C:N | bars | then slice Z / thickness / zoom% | selected tip"
@@ -291,7 +295,7 @@ impl ApplicationHandler<AppAction> for App {
                         as f32;
                     if rt.cutter.dragging.is_some() {
                         rt.cutter.drag_handle(rt.cursor, axis_n);
-                    } else if !rt.orbit.dragging {
+                    } else if !rt.orbit.dragging && !rt.export.contains_cursor(rt.cursor) {
                         let (eye, target) = rt.orbit.eye_target();
                         let rd = click_dir(
                             rt.cursor,
@@ -307,6 +311,16 @@ impl ApplicationHandler<AppAction> for App {
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == MouseButton::Left {
                     if state == ElementState::Pressed && rt.cutter.active {
+                        if rt.export.contains_cursor(rt.cursor) {
+                            if let Some(hit) = rt.export.hit(rt.cursor) {
+                                rt.export.apply_hit(hit);
+                                println!("{}", rt.export.describe());
+                            }
+                            rt.orbit.dragging = false;
+                            rt.orbit.last = None;
+                            rt.window.request_redraw();
+                            return;
+                        }
                         let axis_n = rt.cutter.axis.size(rt.sim.width, rt.sim.height, rt.sim.depth)
                             as f32;
                         if let Some(handle) = rt.cutter.hit_handle(rt.cursor, axis_n) {
@@ -334,7 +348,11 @@ impl ApplicationHandler<AppAction> for App {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 80.0,
                 };
-                if rt.cutter.active && rt.shift {
+                if rt.cutter.active && rt.export.contains_cursor(rt.cursor) {
+                    rt.export.cycle_preset(if steps > 0.0 { 1 } else { -1 });
+                    println!("{}", rt.export.describe());
+                    rt.window.request_redraw();
+                } else if rt.cutter.active && rt.shift {
                     let axis_n = rt.cutter.axis.size(rt.sim.width, rt.sim.height, rt.sim.depth)
                         as f32;
                     rt.cutter.nudge_half(steps * if rt.shift { 2.0 } else { 1.0 }, axis_n);
@@ -420,8 +438,13 @@ impl ApplicationHandler<AppAction> for App {
                 }
                 match logical_key {
                     Key::Named(NamedKey::Escape) => {
-                        if rt.cutter.active {
+                        if rt.cutter.active && rt.export.panel_open {
+                            rt.export.close_panel();
+                            println!("export settings closed");
+                            rt.window.request_redraw();
+                        } else if rt.cutter.active {
                             rt.cutter.leave();
+                            rt.export.close_panel();
                             println!("capture off");
                             rt.window.request_redraw();
                         } else {
@@ -444,12 +467,33 @@ impl ApplicationHandler<AppAction> for App {
                         rt.cutter.toggle(rt.sim.slice.z, rt.sim.depth);
                         if rt.cutter.active {
                             println!("{}", rt.cutter.describe());
+                            println!("{}", rt.export.describe());
                             println!(
-                                "C cycle 2D/rich | X axis | hover face center/mid-edge to snap | H heightmap | Y height axis | Shift+wheel thickness"
+                                "C cycle 2D/rich | S settings | X axis | hover face center/mid-edge to snap | H heightmap | Y height axis | Shift+wheel thickness"
                             );
                         } else {
+                            rt.export.close_panel();
                             println!("capture off");
                         }
+                        rt.window.request_redraw();
+                    }
+                    Key::Character(c) if c.eq_ignore_ascii_case("s") && rt.cutter.active => {
+                        rt.export.toggle_panel();
+                        println!(
+                            "export settings {}  {}",
+                            if rt.export.panel_open { "open" } else { "closed" },
+                            rt.export.describe()
+                        );
+                        rt.window.request_redraw();
+                    }
+                    Key::Character(c) if c.eq_ignore_ascii_case("p") && rt.cutter.active => {
+                        rt.export.fit = rt.export.fit.cycle();
+                        println!("{}", rt.export.describe());
+                        rt.window.request_redraw();
+                    }
+                    Key::Character(c) if c.eq_ignore_ascii_case("a") && rt.cutter.active => {
+                        rt.export.aspect = rt.export.aspect.cycle();
+                        println!("{}", rt.export.describe());
                         rt.window.request_redraw();
                     }
                     Key::Character(c) if c.eq_ignore_ascii_case("c") && rt.cutter.active => {
@@ -547,8 +591,9 @@ impl ApplicationHandler<AppAction> for App {
                         }
                         if rt.cutter.active {
                             rt.window.set_title(&format!(
-                                "Pycelium 3D | {}",
-                                rt.cutter.describe()
+                                "Pycelium 3D | {}  {}",
+                                rt.cutter.describe(),
+                                rt.export.describe()
                             ));
                         }
                         rt.sim.render(
@@ -565,6 +610,7 @@ impl ApplicationHandler<AppAction> for App {
                             rt.label_fade,
                             rt.has_picked,
                             rt.cutter.present_vec(),
+                            rt.export.present_vec(),
                         );
                         rt.window.pre_present_notify();
                         rt.gpu.queue.present(frame);
@@ -614,20 +660,24 @@ fn export_slice(rt: &Runtime) -> anyhow::Result<()> {
         .sim
         .read_volume_fields(&rt.gpu.device, &rt.gpu.queue)?;
     let plane = extract_slice(&vol, &rt.cutter, rt.cutter.mode == crate::cutter::CaptureMode::RichBox);
+    let composed = apply_export_layout(&plane, &rt.export);
     let stamp = utc_stamp(SystemTime::now());
-    let paths = write_exports(
+    let paths = write_exports_with_meta(
         &rt.export_dir,
-        &plane,
+        &composed,
         &rt.cutter,
         (rt.sim.width, rt.sim.height, rt.sim.depth),
         &stamp,
+        Some(&rt.export),
+        (plane.width, plane.height),
     )?;
     println!(
-        "exported {}  {}  {}  {}",
+        "exported {}  {}  {}×{}  {}",
         paths.png.display(),
-        paths.json.display(),
-        paths.svg.display(),
-        paths.mask.display()
+        rt.export.describe(),
+        composed.width,
+        composed.height,
+        paths.json.display()
     );
     if let Some(h) = paths.height {
         println!("heightmap {}", h.display());

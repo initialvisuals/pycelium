@@ -191,6 +191,8 @@ pub struct PresentUniforms {
     /// Capture cutter: x = axis (0/1/2), y = pos 0..1, z = half-thickness voxels,
     /// w = 0 off / 1 squash / 2 rich (+0.5 when face-snapped).
     pub cutter: [f32; 4],
+    /// Export settings card: x = panel open, y = preset index, z = native aspect, w = crop.
+    pub export_ui: [f32; 4],
 }
 
 /// Orthogonal section through the pedon. Depth is the plane; thickness is
@@ -251,6 +253,6 @@ mod tests {
     fn present_uniforms_stay_16_byte_aligned() {
         assert_eq!(std::mem::size_of::<PresentUniforms>() % 16, 0);
         assert!(std::mem::size_of::<PresentUniforms>() >= 176);
-        assert_eq!(std::mem::size_of::<PresentUniforms>(), 11 * 16);
+        assert_eq!(std::mem::size_of::<PresentUniforms>(), 12 * 16);
     }
 }

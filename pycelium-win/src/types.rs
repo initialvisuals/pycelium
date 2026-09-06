@@ -193,6 +193,14 @@ pub struct PresentUniforms {
     pub cutter: [f32; 4],
     /// Export settings card: x = panel open, y = preset index, z = native aspect, w = crop.
     pub export_ui: [f32; 4],
+    /// Overlay fades: x = scheme panel, y = teach tip.
+    pub overlay_ui: [f32; 4],
+    /// Control-scheme panel UV rect (x0,y0,x1,y1).
+    pub help_rect: [f32; 4],
+    /// Hover teach popup UV rect (x0,y0,x1,y1).
+    pub tip_rect: [f32; 4],
+    /// Elbow: xy = hovered control, zw = popup attach.
+    pub callout: [f32; 4],
 }
 
 /// Orthogonal section through the pedon. Depth is the plane; thickness is
@@ -253,6 +261,6 @@ mod tests {
     fn present_uniforms_stay_16_byte_aligned() {
         assert_eq!(std::mem::size_of::<PresentUniforms>() % 16, 0);
         assert!(std::mem::size_of::<PresentUniforms>() >= 176);
-        assert_eq!(std::mem::size_of::<PresentUniforms>(), 12 * 16);
+        assert_eq!(std::mem::size_of::<PresentUniforms>(), 16 * 16);
     }
 }

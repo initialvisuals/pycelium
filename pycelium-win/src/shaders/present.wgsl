@@ -43,6 +43,10 @@ struct PresentUniforms {
     hud_ui: vec4<f32>,
     cutter: vec4<f32>,
     export_ui: vec4<f32>,
+    overlay_ui: vec4<f32>,
+    help_rect: vec4<f32>,
+    tip_rect: vec4<f32>,
+    callout: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> u: PresentUniforms;
@@ -55,6 +59,13 @@ struct PresentUniforms {
 @group(0) @binding(7) var<storage, read> tips: array<Tip>;
 @group(0) @binding(8) var font_tex: texture_2d<f32>;
 @group(0) @binding(9) var font_samp: sampler;
+@group(0) @binding(10) var<storage, read> overlay: array<u32>;
+
+const HELP_COLS: i32 = 26;
+const HELP_ROWS: i32 = 22;
+const TIP_COLS: i32 = 36;
+const TIP_ROWS: i32 = 8;
+const TIP_BASE: i32 = 572;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -166,7 +177,7 @@ fn px() -> vec2<f32> {
     return vec2<f32>(1.0 / max(f32(u.out_w), 1.0), 1.0 / max(f32(u.out_h), 1.0));
 }
 
-// Geometric sans atlas: 16×3 cells of 32px. cell.y = 0 is the TOP of the glyph.
+// Geometric sans atlas: 16×4 cells of 32px. cell.y = 0 is the TOP of the glyph.
 // Built in hud_font.rs (upright). The old 5×5 pack was sampled with 1-y and looked inverted.
 fn letter(cell: vec2<f32>, ch: i32) -> f32 {
     if ch <= 0 { return 0.0; }
@@ -175,7 +186,7 @@ fn letter(cell: vec2<f32>, ch: i32) -> f32 {
     }
     let col = ch % 16;
     let row = ch / 16;
-    let uv = (vec2<f32>(f32(col), f32(row)) + cell) / vec2<f32>(16.0, 3.0);
+    let uv = (vec2<f32>(f32(col), f32(row)) + cell) / vec2<f32>(16.0, 4.0);
     return textureSampleLevel(font_tex, font_samp, uv, 0.0).r;
 }
 
@@ -290,6 +301,88 @@ fn draw_label(uv: vec2<f32>, origin: vec2<f32>, id: i32) -> f32 {
     let ch = label_char(id, slot);
     if ch < 0 { return 0.0; }
     return letter(cell, ch);
+}
+
+fn sd_seg(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let pa = p - a;
+    let ba = b - a;
+    let h = clamp(dot(pa, ba) / max(dot(ba, ba), 1.0e-8), 0.0, 1.0);
+    return length(pa - ba * h);
+}
+
+fn fill_rect(uv: vec2<f32>, r0: vec2<f32>, r1: vec2<f32>) -> f32 {
+    if uv.x >= r0.x && uv.x <= r1.x && uv.y >= r0.y && uv.y <= r1.y {
+        return 1.0;
+    }
+    return 0.0;
+}
+
+fn grid_letter(uv: vec2<f32>, r0: vec2<f32>, r1: vec2<f32>, cols: i32, rows: i32, base: i32) -> f32 {
+    let size = r1 - r0;
+    let local = (uv - r0) / max(size, vec2<f32>(1.0e-5, 1.0e-5));
+    if local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0 {
+        return 0.0;
+    }
+    let cx = i32(floor(local.x * f32(cols)));
+    let cy = i32(floor(local.y * f32(rows)));
+    if cx < 0 || cy < 0 || cx >= cols || cy >= rows {
+        return 0.0;
+    }
+    let idx = u32(base + cy * cols + cx);
+    if idx >= arrayLength(&overlay) {
+        return 0.0;
+    }
+    let ch = i32(overlay[idx]);
+    if ch <= 0 {
+        return 0.0;
+    }
+    let cell = vec2<f32>(fract(local.x * f32(cols)), fract(local.y * f32(rows)));
+    return letter(cell, ch);
+}
+
+fn paint_card(uv: vec2<f32>, r0: vec2<f32>, r1: vec2<f32>, fade: f32, rgb: vec3<f32>) -> vec3<f32> {
+    if fade <= 0.004 {
+        return rgb;
+    }
+    let p = px();
+    var out = rgb;
+    let shadow = fill_rect(uv, r0 + p * 2.0, r1 + p * 2.0);
+    out = mix(out, vec3<f32>(0.0, 0.0, 0.0), shadow * 0.40 * fade);
+    let body = fill_rect(uv, r0, r1);
+    out = mix(out, vec3<f32>(0.035, 0.038, 0.042), body * 0.90 * fade);
+    out = mix(out, vec3<f32>(0.92, 0.93, 0.90), thin_frame(uv, r0, r1) * fade);
+    return out;
+}
+
+fn paint_grid(uv: vec2<f32>, r0: vec2<f32>, r1: vec2<f32>, cols: i32, rows: i32, base: i32, fade: f32, rgb: vec3<f32>) -> vec3<f32> {
+    if fade <= 0.004 {
+        return rgb;
+    }
+    let p = px();
+    let inner0 = r0 + p * 3.0;
+    let inner1 = r1 - p * 3.0;
+    let shadow = grid_letter(uv, inner0 + p * 1.5, inner1 + p * 1.5, cols, rows, base);
+    let ink = grid_letter(uv, inner0, inner1, cols, rows, base);
+    var out = rgb;
+    out = mix(out, vec3<f32>(0.0, 0.0, 0.0), shadow * fade * 0.45);
+    out = mix(out, vec3<f32>(1.0, 1.0, 1.0), ink * fade);
+    return out;
+}
+
+fn paint_elbow(uv: vec2<f32>, a: vec2<f32>, b: vec2<f32>, fade: f32, rgb: vec3<f32>) -> vec3<f32> {
+    if fade <= 0.004 {
+        return rgb;
+    }
+    let corner = vec2<f32>(b.x, a.y);
+    let d = min(sd_seg(uv, a, corner), sd_seg(uv, corner, b));
+    let p = px();
+    let w = 1.15 * max(p.x, p.y);
+    let sw = 2.15 * max(p.x, p.y);
+    let sh = min(sd_seg(uv - p * 1.5, a, corner), sd_seg(uv - p * 1.5, corner, b));
+    var out = rgb;
+    out = mix(out, vec3<f32>(0.0, 0.0, 0.0), select(0.0, 0.40 * fade, sh < sw));
+    out = mix(out, vec3<f32>(0.94, 0.95, 0.92), select(0.0, fade, d < w));
+    return out;
 }
 
 fn thin_frame(uv: vec2<f32>, r0: vec2<f32>, r1: vec2<f32>) -> f32 {
@@ -685,6 +778,22 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         rgb = paint_label(uv, vec2<f32>(0.032, 0.780), 16, a16, rgb);
         rgb = paint_label(uv, vec2<f32>(0.032, 0.822), 17, a17, rgb);
         rgb = paint_label(uv, vec2<f32>(0.032, 0.892), 18, a18, rgb);
+    }
+
+    let help_fade = clamp(u.overlay_ui.x, 0.0, 1.0);
+    let tip_fade = clamp(u.overlay_ui.y, 0.0, 1.0);
+    if help_fade > 0.004 {
+        let h0 = u.help_rect.xy;
+        let h1 = u.help_rect.zw;
+        rgb = paint_card(uv, h0, h1, help_fade, rgb);
+        rgb = paint_grid(uv, h0, h1, HELP_COLS, HELP_ROWS, 0, help_fade, rgb);
+    }
+    if tip_fade > 0.004 {
+        rgb = paint_elbow(uv, u.callout.xy, u.callout.zw, tip_fade, rgb);
+        let t0 = u.tip_rect.xy;
+        let t1 = u.tip_rect.zw;
+        rgb = paint_card(uv, t0, t1, tip_fade, rgb);
+        rgb = paint_grid(uv, t0, t1, TIP_COLS, TIP_ROWS, TIP_BASE, tip_fade, rgb);
     }
 
     return vec4<f32>(rgb, 1.0);

@@ -5,6 +5,7 @@ use crate::config::MemoryPlan;
 use crate::export::VolumeFields;
 use crate::hud_font;
 use crate::memory::HostWorld;
+use crate::teach::{OverlayGpu, OVERLAY_WORDS};
 use crate::types::{PresentUniforms, SimUniforms, SliceView, TEL_COUNT, Tip};
 
 const TIP_WG: u32 = 64;
@@ -93,6 +94,7 @@ pub struct MyceliumGpu {
     sim_bg: wgpu::BindGroup,
     present_pipeline: wgpu::RenderPipeline,
     present_bg: wgpu::BindGroup,
+    overlay_buf: wgpu::Buffer,
     #[allow(dead_code)]
     font_tex: wgpu::Texture,
     #[allow(dead_code)]
@@ -207,7 +209,15 @@ impl MyceliumGpu {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                storage_entry(10, wgpu::ShaderStages::FRAGMENT, true),
             ],
+        });
+
+        let overlay_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("overlay-text"),
+            size: (OVERLAY_WORDS * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
 
         let atlas = hud_font::rasterize_atlas();
@@ -329,6 +339,7 @@ impl MyceliumGpu {
                     binding: 9,
                     resource: wgpu::BindingResource::Sampler(&font_samp),
                 },
+                bind(&overlay_buf, 10),
             ],
         });
 
@@ -365,6 +376,7 @@ impl MyceliumGpu {
             sim_bg,
             present_pipeline,
             present_bg,
+            overlay_buf,
             font_tex,
             font_samp,
             tick: 0,
@@ -455,6 +467,7 @@ impl MyceliumGpu {
         has_picked: bool,
         cutter: [f32; 4],
         export_ui: [f32; 4],
+        overlay: &OverlayGpu,
     ) {
         let present = PresentUniforms {
             width: self.width,
@@ -490,8 +503,13 @@ impl MyceliumGpu {
             hud_ui: [cursor[0], cursor[1], label_density, label_fade],
             cutter,
             export_ui,
+            overlay_ui: overlay.overlay_ui,
+            help_rect: overlay.help_rect,
+            tip_rect: overlay.tip_rect,
+            callout: overlay.callout,
         };
         queue.write_buffer(&self.present_buf, 0, bytemuck::bytes_of(&present));
+        queue.write_buffer(&self.overlay_buf, 0, bytemuck::cast_slice(&overlay.chars));
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("present"),
         });

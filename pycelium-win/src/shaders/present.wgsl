@@ -42,6 +42,7 @@ struct PresentUniforms {
     slice_oy: f32,
     hud_ui: vec4<f32>,
     cutter: vec4<f32>,
+    export_ui: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> u: PresentUniforms;
@@ -118,6 +119,23 @@ fn digit(cell: vec2<f32>, n: i32) -> f32 {
     }
     let bit = u32(p.y * 3 + p.x);
     return f32((bits >> bit) & 1u);
+}
+
+fn draw_number_trim(uv: vec2<f32>, origin: vec2<f32>, value: f32, digits: i32) -> f32 {
+    let local = (uv - origin) / vec2<f32>(0.0082 * f32(digits), 0.016);
+    if local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0 {
+        return 0.0;
+    }
+    let n = max(i32(value), 0);
+    let slot = i32(floor(local.x * f32(digits)));
+    let cell = vec2<f32>(fract(local.x * f32(digits)), local.y);
+    var div = 1;
+    for (var i = 0; i < digits - slot - 1; i++) { div = div * 10; }
+    let d = (n / div) % 10;
+    if d == 0 && n < div && slot < digits - 1 {
+        return 0.0;
+    }
+    return digit(cell, d);
 }
 
 fn draw_number(uv: vec2<f32>, origin: vec2<f32>, value: f32, digits: i32) -> f32 {
@@ -220,6 +238,42 @@ fn label_char(id: i32, slot: i32) -> i32 {
         }
         case 18: { // PARAM
             switch slot { case 0: { return 16; } case 1: { return 1; } case 2: { return 18; } case 3: { return 1; } case 4: { return 13; } default: { return -1; } }
+        }
+        case 19: { // EXPORT
+            switch slot { case 0: { return 5; } case 1: { return 24; } case 2: { return 16; } case 3: { return 15; } case 4: { return 18; } case 5: { return 20; } default: { return -1; } }
+        }
+        case 20: { // SIZE
+            switch slot { case 0: { return 19; } case 1: { return 9; } case 2: { return 26; } case 3: { return 5; } default: { return -1; } }
+        }
+        case 21: { // FIT
+            switch slot { case 0: { return 6; } case 1: { return 9; } case 2: { return 20; } default: { return -1; } }
+        }
+        case 22: { // PAD
+            switch slot { case 0: { return 16; } case 1: { return 1; } case 2: { return 4; } default: { return -1; } }
+        }
+        case 23: { // CROP
+            switch slot { case 0: { return 3; } case 1: { return 18; } case 2: { return 15; } case 3: { return 16; } default: { return -1; } }
+        }
+        case 24: { // ASPECT
+            switch slot { case 0: { return 1; } case 1: { return 19; } case 2: { return 16; } case 3: { return 5; } case 4: { return 3; } case 5: { return 20; } default: { return -1; } }
+        }
+        case 25: { // SQUARE
+            switch slot { case 0: { return 19; } case 1: { return 17; } case 2: { return 21; } case 3: { return 1; } case 4: { return 18; } case 5: { return 5; } default: { return -1; } }
+        }
+        case 26: { // NATIVE
+            switch slot { case 0: { return 14; } case 1: { return 1; } case 2: { return 20; } case 3: { return 9; } case 4: { return 22; } case 5: { return 5; } default: { return -1; } }
+        }
+        case 27: { // PNG
+            switch slot { case 0: { return 16; } case 1: { return 14; } case 2: { return 7; } default: { return -1; } }
+        }
+        case 28: { // MASK
+            switch slot { case 0: { return 13; } case 1: { return 1; } case 2: { return 19; } case 3: { return 11; } default: { return -1; } }
+        }
+        case 29: { // JSON
+            switch slot { case 0: { return 10; } case 1: { return 19; } case 2: { return 15; } case 3: { return 14; } default: { return -1; } }
+        }
+        case 30: { // SVG
+            switch slot { case 0: { return 19; } case 1: { return 22; } case 2: { return 7; } default: { return -1; } }
         }
         default: { return -1; }
     }
@@ -429,6 +483,76 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             }
             let frame = step(min(min((uv.x - (sx0 - 0.008)), (sx1 + 0.008) - uv.x), min(uv.y - sy0, sy1 - uv.y)), 0.002);
             rgb = mix(srgb, vec3<f32>(0.80, 0.78, 0.70), frame);
+        }
+
+        // Export settings card. Geometry matches export_settings.rs.
+        let ex0 = 0.735;
+        let ex1 = 0.985;
+        let ey0 = 0.368;
+        let chip1 = 0.418;
+        let ey1 = select(chip1, 0.882, u.export_ui.x >= 0.5);
+        if uv.x >= ex0 && uv.x <= ex1 && uv.y >= ey0 && uv.y <= ey1 {
+            let cursor = u.hud_ui.xy;
+            let hover = cursor.x >= ex0 && cursor.x <= ex1 && cursor.y >= ey0 && cursor.y <= ey1;
+            var card = vec3<f32>(0.045, 0.048, 0.052);
+            if hover {
+                card = vec3<f32>(0.055, 0.058, 0.062);
+            }
+            rgb = mix(rgb, card, 0.88);
+            let frame = thin_frame(uv, vec2<f32>(ex0, ey0), vec2<f32>(ex1, ey1));
+            rgb = mix(rgb, vec3<f32>(0.80, 0.78, 0.70), frame);
+            rgb = paint_label(uv, vec2<f32>(0.742, 0.378), 19, 1.0, rgb);
+            let sizes = array<f32, 11>(8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0, 8192.0);
+            let preset = i32(u.export_ui.y + 0.5);
+            let pidx = clamp(preset, 0, 10);
+            var size_ink = draw_number_trim(uv, vec2<f32>(0.868, 0.382), sizes[pidx], 4);
+            rgb = rgb + vec3<f32>(0.95, 0.72, 0.28) * size_ink;
+            if u.export_ui.x >= 0.5 {
+                rgb = paint_label(uv, vec2<f32>(0.742, 0.424), 20, 0.85, rgb);
+                let row_h = 0.028;
+                let row0 = 0.448;
+                for (var i = 0; i < 11; i++) {
+                    let y0 = row0 + f32(i) * row_h;
+                    let y1 = y0 + row_h;
+                    let sel = i == pidx;
+                    if uv.y >= y0 && uv.y < y1 {
+                        var rowc = select(vec3<f32>(0.06, 0.06, 0.07), vec3<f32>(0.42, 0.20, 0.05), sel);
+                        if cursor.y >= y0 && cursor.y < y1 && cursor.x >= ex0 && cursor.x <= ex1 && !sel {
+                            rowc = vec3<f32>(0.10, 0.10, 0.11);
+                        }
+                        rgb = mix(rgb, rowc, 0.75);
+                    }
+                    var ink = draw_number_trim(uv, vec2<f32>(0.802, y0 + 0.005), sizes[i], 4);
+                    let tint = select(vec3<f32>(0.78, 0.80, 0.76), vec3<f32>(1.0, 0.72, 0.28), sel);
+                    rgb = rgb + tint * ink;
+                }
+                rgb = paint_label(uv, vec2<f32>(0.742, 0.748), 21, 0.8, rgb);
+                let mid = 0.5 * (ex0 + ex1);
+                let fit_crop = u.export_ui.w >= 0.5;
+                let native = u.export_ui.z >= 0.5;
+                if uv.y >= 0.768 && uv.y <= 0.808 {
+                    if uv.x < mid {
+                        rgb = mix(rgb, select(vec3<f32>(0.07, 0.07, 0.08), vec3<f32>(0.42, 0.20, 0.05), !fit_crop), 0.7);
+                    } else {
+                        rgb = mix(rgb, select(vec3<f32>(0.07, 0.07, 0.08), vec3<f32>(0.42, 0.20, 0.05), fit_crop), 0.7);
+                    }
+                }
+                rgb = paint_label(uv, vec2<f32>(0.742, 0.776), 22, select(0.55, 1.0, !fit_crop), rgb);
+                rgb = paint_label(uv, vec2<f32>(0.862, 0.776), 23, select(0.55, 1.0, fit_crop), rgb);
+                if uv.y >= 0.816 && uv.y <= 0.856 {
+                    if uv.x < mid {
+                        rgb = mix(rgb, select(vec3<f32>(0.07, 0.07, 0.08), vec3<f32>(0.42, 0.20, 0.05), !native), 0.7);
+                    } else {
+                        rgb = mix(rgb, select(vec3<f32>(0.07, 0.07, 0.08), vec3<f32>(0.42, 0.20, 0.05), native), 0.7);
+                    }
+                }
+                rgb = paint_label(uv, vec2<f32>(0.742, 0.824), 25, select(0.55, 1.0, !native), rgb);
+                rgb = paint_label(uv, vec2<f32>(0.862, 0.824), 26, select(0.55, 1.0, native), rgb);
+                rgb = paint_label(uv, vec2<f32>(0.742, 0.860), 27, 0.55, rgb);
+                rgb = paint_label(uv, vec2<f32>(0.802, 0.860), 28, 0.55, rgb);
+                rgb = paint_label(uv, vec2<f32>(0.862, 0.860), 29, 0.45, rgb);
+                rgb = paint_label(uv, vec2<f32>(0.922, 0.860), 30, 0.45, rgb);
+            }
         }
     }
 

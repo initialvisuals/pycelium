@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::cutter::{Axis, CaptureMode, Cutter};
+use crate::export_settings::{ExportAspect, ExportSettings, FitMode};
 
 #[derive(Clone, Debug)]
 pub struct VolumeFields {
@@ -80,6 +81,11 @@ struct SliceJson {
     plane: PlaneMeta,
     heightmap_axis: &'static str,
     heightmap: bool,
+    export_aspect: &'static str,
+    export_fit: &'static str,
+    export_preset: u32,
+    source_width: u32,
+    source_height: u32,
     stats: SliceStats,
     density_encoding: &'static str,
     density_u8: Vec<u8>,
@@ -232,12 +238,157 @@ pub fn plane_stats(plane: &SlicePlane) -> SliceStats {
     }
 }
 
+/// Crop to the occupied density AABB and/or letterbox into a square POT canvas.
+pub fn apply_export_layout(plane: &SlicePlane, settings: &ExportSettings) -> SlicePlane {
+    let work = match settings.fit {
+        FitMode::CropAabb => crop_to_dense_aabb(plane),
+        FitMode::Pad => plane.clone(),
+    };
+    match settings.aspect {
+        ExportAspect::Square => letterbox_to(&work, settings.square_size(), settings.square_size()),
+        ExportAspect::Native => work,
+    }
+}
+
+fn dense_threshold(plane: &SlicePlane) -> f32 {
+    let max_b = plane.biomass.iter().copied().fold(0.0f32, f32::max);
+    (max_b * 0.15).max(0.02)
+}
+
+fn crop_to_dense_aabb(plane: &SlicePlane) -> SlicePlane {
+    let t = dense_threshold(plane);
+    let mut x0 = plane.width;
+    let mut y0 = plane.height;
+    let mut x1 = 0u32;
+    let mut y1 = 0u32;
+    for v in 0..plane.height {
+        for u in 0..plane.width {
+            let i = (v * plane.width + u) as usize;
+            if plane.biomass[i] > t {
+                x0 = x0.min(u);
+                y0 = y0.min(v);
+                x1 = x1.max(u);
+                y1 = y1.max(v);
+            }
+        }
+    }
+    if x0 > x1 {
+        return plane.clone();
+    }
+    let x0 = x0.saturating_sub(1);
+    let y0 = y0.saturating_sub(1);
+    let x1 = (x1 + 1).min(plane.width.saturating_sub(1));
+    let y1 = (y1 + 1).min(plane.height.saturating_sub(1));
+    crop_rect(plane, x0, y0, x1, y1)
+}
+
+fn crop_rect(plane: &SlicePlane, x0: u32, y0: u32, x1: u32, y1: u32) -> SlicePlane {
+    let width = x1.saturating_sub(x0) + 1;
+    let height = y1.saturating_sub(y0) + 1;
+    let n = (width as usize).saturating_mul(height as usize);
+    let mut biomass = vec![0.0f32; n];
+    let mut soluble = vec![0.0f32; n];
+    let mut height_along = vec![0.0f32; n];
+    for v in 0..height {
+        for u in 0..width {
+            let src = ((y0 + v) * plane.width + (x0 + u)) as usize;
+            let dst = (v * width + u) as usize;
+            biomass[dst] = plane.biomass[src];
+            soluble[dst] = plane.soluble[src];
+            height_along[dst] = plane.height_along[src];
+        }
+    }
+    let mut out = plane.clone();
+    out.width = width;
+    out.height = height;
+    out.biomass = biomass;
+    out.soluble = soluble;
+    out.height_along = height_along;
+    out
+}
+
+fn letterbox_to(plane: &SlicePlane, dst_w: u32, dst_h: u32) -> SlicePlane {
+    if dst_w == 0 || dst_h == 0 {
+        return plane.clone();
+    }
+    if plane.width == dst_w && plane.height == dst_h {
+        return plane.clone();
+    }
+    let sw = plane.width.max(1) as f32;
+    let sh = plane.height.max(1) as f32;
+    let scale = (dst_w as f32 / sw).min(dst_h as f32 / sh);
+    let nw = sw * scale;
+    let nh = sh * scale;
+    let ox = (dst_w as f32 - nw) * 0.5;
+    let oy = (dst_h as f32 - nh) * 0.5;
+    let n = (dst_w as usize).saturating_mul(dst_h as usize);
+    let mut biomass = vec![0.0f32; n];
+    let mut soluble = vec![0.0f32; n];
+    let mut height_along = vec![0.0f32; n];
+    for v in 0..dst_h {
+        for u in 0..dst_w {
+            let sx = (u as f32 + 0.5 - ox) / scale - 0.5;
+            let sy = (v as f32 + 0.5 - oy) / scale - 0.5;
+            let i = (v * dst_w + u) as usize;
+            if sx < -0.5 || sy < -0.5 || sx > sw - 0.5 || sy > sh - 0.5 {
+                continue;
+            }
+            biomass[i] = sample_bilinear(&plane.biomass, plane.width, plane.height, sx, sy);
+            soluble[i] = sample_bilinear(&plane.soluble, plane.width, plane.height, sx, sy);
+            height_along[i] =
+                sample_bilinear(&plane.height_along, plane.width, plane.height, sx, sy);
+        }
+    }
+    let mut out = plane.clone();
+    out.width = dst_w;
+    out.height = dst_h;
+    out.biomass = biomass;
+    out.soluble = soluble;
+    out.height_along = height_along;
+    out
+}
+
+fn sample_bilinear(field: &[f32], w: u32, h: u32, x: f32, y: f32) -> f32 {
+    if w == 0 || h == 0 || field.is_empty() {
+        return 0.0;
+    }
+    let x0 = x.floor() as i32;
+    let y0 = y.floor() as i32;
+    let tx = (x - x0 as f32).clamp(0.0, 1.0);
+    let ty = (y - y0 as f32).clamp(0.0, 1.0);
+    let at = |ix: i32, iy: i32| -> f32 {
+        if ix < 0 || iy < 0 || ix >= w as i32 || iy >= h as i32 {
+            return 0.0;
+        }
+        field[(iy as u32 * w + ix as u32) as usize]
+    };
+    let a = at(x0, y0);
+    let b = at(x0 + 1, y0);
+    let c = at(x0, y0 + 1);
+    let d = at(x0 + 1, y0 + 1);
+    let top = a * (1.0 - tx) + b * tx;
+    let bot = c * (1.0 - tx) + d * tx;
+    top * (1.0 - ty) + bot * ty
+}
+
 pub fn write_exports(
     dir: &Path,
     plane: &SlicePlane,
     cutter: &Cutter,
     grid: (u32, u32, u32),
     stamp: &str,
+) -> Result<ExportPaths> {
+    write_exports_with_meta(dir, plane, cutter, grid, stamp, None, (plane.width, plane.height))
+}
+
+pub fn write_exports_with_meta(
+    dir: &Path,
+    plane: &SlicePlane,
+    cutter: &Cutter,
+    grid: (u32, u32, u32),
+    stamp: &str,
+    settings: Option<&ExportSettings>,
+    source: (u32, u32),
 ) -> Result<ExportPaths> {
     fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
     let stem = format!(
@@ -262,7 +413,7 @@ pub fn write_exports(
         write_height_png(hpath, plane)?;
     }
     write_svg(&svg, plane)?;
-    write_json(&json, plane, cutter, grid, stamp)?;
+    write_json(&json, plane, cutter, grid, stamp, settings, source)?;
 
     Ok(ExportPaths {
         png,
@@ -371,6 +522,8 @@ fn write_json(
     cutter: &Cutter,
     grid: (u32, u32, u32),
     stamp: &str,
+    settings: Option<&ExportSettings>,
+    source: (u32, u32),
 ) -> Result<()> {
     let stats = plane_stats(plane);
     let max_b = stats.max.max(1e-6);
@@ -383,6 +536,10 @@ fn write_json(
         plane.volume_samples.clone()
     } else {
         Vec::new()
+    };
+    let (export_aspect, export_fit, export_preset) = match settings {
+        Some(s) => (s.aspect.as_str(), s.fit.as_str(), s.square_size()),
+        None => ("native", "pad", 0),
     };
     let doc = SliceJson {
         format: "pycelium-slice-v1",
@@ -406,6 +563,11 @@ fn write_json(
         },
         heightmap_axis: cutter.heightmap_axis.as_str(),
         heightmap: cutter.export_heightmap,
+        export_aspect,
+        export_fit,
+        export_preset,
+        source_width: source.0,
+        source_height: source.1,
         stats,
         density_encoding: "u8_row_major",
         density_u8,
@@ -668,5 +830,92 @@ mod tests {
         let s = plane_stats(&plane);
         assert_eq!(s.occupied, 1);
         assert!(s.max >= 0.3);
+    }
+
+    #[test]
+    fn default_layout_is_512_square() {
+        let vol = brick(8, 6, 4, (2, 3, 1), 1.0);
+        let mut c = Cutter::new(4);
+        c.enter(1.0, 4);
+        c.axis = Axis::Z;
+        c.pos = 0.25;
+        let plane = extract_slice(&vol, &c, false);
+        assert_eq!((plane.width, plane.height), (8, 6));
+        let out = apply_export_layout(&plane, &ExportSettings::default());
+        assert_eq!((out.width, out.height), (512, 512));
+        let i = (256 * 512 + 256) as usize;
+        // Marked voxel (2,3) maps near the center of an 8×6 letterbox.
+        assert!(out.biomass.iter().any(|&b| b > 0.2), "hypha should survive upsample");
+        assert!(out.biomass[i] < 1.5);
+    }
+
+    #[test]
+    fn native_aspect_keeps_slab_size() {
+        let vol = brick(8, 6, 4, (2, 1, 1), 1.0);
+        let mut c = Cutter::new(4);
+        c.enter(1.0, 4);
+        c.axis = Axis::Z;
+        c.pos = 0.25;
+        let plane = extract_slice(&vol, &c, false);
+        let mut settings = ExportSettings::default();
+        settings.aspect = ExportAspect::Native;
+        let out = apply_export_layout(&plane, &settings);
+        assert_eq!((out.width, out.height), (8, 6));
+    }
+
+    #[test]
+    fn crop_aabb_then_square_pads_occupied_region() {
+        let vol = brick(16, 16, 4, (2, 2, 1), 1.0);
+        let mut c = Cutter::new(4);
+        c.enter(1.0, 4);
+        c.axis = Axis::Z;
+        c.pos = 0.25;
+        let plane = extract_slice(&vol, &c, false);
+        let mut settings = ExportSettings::default();
+        settings.fit = FitMode::CropAabb;
+        settings.preset_index = 2; // 32×32
+        let out = apply_export_layout(&plane, &settings);
+        assert_eq!((out.width, out.height), (32, 32));
+        let occupied = out.biomass.iter().filter(|b| **b > 0.2).count();
+        assert!(occupied > 0);
+        // Crop should fill more of the canvas than padding the whole 16×16.
+        settings.fit = FitMode::Pad;
+        let padded = apply_export_layout(&plane, &settings);
+        let pad_occ = padded.biomass.iter().filter(|b| **b > 0.2).count();
+        assert!(occupied >= pad_occ);
+    }
+
+    #[test]
+    fn write_bundle_records_export_meta() {
+        let dir = std::env::temp_dir().join(format!(
+            "pycelium-slice-meta-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let vol = brick(8, 8, 4, (2, 3, 1), 1.0);
+        let mut c = Cutter::new(4);
+        c.enter(1.0, 4);
+        c.pos = 0.25;
+        let plane = extract_slice(&vol, &c, false);
+        let settings = ExportSettings::default();
+        let composed = apply_export_layout(&plane, &settings);
+        let paths = write_exports_with_meta(
+            &dir,
+            &composed,
+            &c,
+            (8, 8, 4),
+            "20260102_030405",
+            Some(&settings),
+            (plane.width, plane.height),
+        )
+        .unwrap();
+        let (pw, ph) = png_size(&paths.png).unwrap();
+        assert_eq!((pw, ph), (512, 512));
+        let json = fs::read_to_string(&paths.json).unwrap();
+        assert!(json.contains("\"export_aspect\": \"square\""));
+        assert!(json.contains("\"export_fit\": \"pad\""));
+        assert!(json.contains("\"export_preset\": 512"));
+        assert!(json.contains("\"source_width\": 8"));
+        let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -10,10 +10,13 @@ Orbit, tip pick, HUD glyphs/labels, and **Tab** label density are unchanged. Cap
 |-----|--------|
 | `E` | Toggle capture mode |
 | `C` | Cycle **2D squash** ↔ **rich box** (while capturing) |
+| `S` | Toggle the **export settings** card (while capturing) |
+| `P` | Cycle **pad** ↔ **crop** to dense AABB |
+| `A` | Cycle **square POT** ↔ **native** aspect (advanced) |
 | `Enter` | Write files (timestamped stem) |
-| `Esc` | Leave capture (quit only when capture is off) |
+| `Esc` | Close settings if open; otherwise leave capture (quit only when capture is off) |
 
-Mouse move positions the cutter through the cube. Left-drag still orbits unless you grab a slider handle. Click-to-pick is disabled while capturing.
+Mouse move positions the cutter through the cube. Left-drag still orbits unless you grab a slider handle or click the settings card. Click-to-pick is disabled while capturing.
 
 ## Two capture modes
 
@@ -31,6 +34,20 @@ Hover a **face mid-edge** to rotate **90° on the free axis** (top-face left/rig
 
 `X` cycles axis by hand if snap misses. `Y` cycles the optional heightmap axis (and turns heightmap export on). `H` toggles writing the heightmap PNG.
 
+## Export settings (square POT)
+
+Default bake is a **power-of-two square**, not the ultra-wide native slab. The in-engine settings card sits on the right under the slab inset while capturing. Click the **EXPORT** chip (or press `S`) to open it.
+
+| Control | Default | Notes |
+|---------|---------|--------|
+| Size preset | **512×512** | 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, **8192 (8K)**. Click a row, or wheel over the card. |
+| Fit | **Pad** | Letterbox / pillarbox the full plane into the square. **Crop** trims to the occupied density AABB first, then pads. |
+| Aspect | **Square** | Advanced: **Native** keeps the extracted slab width×height (old behavior). Size presets apply only to square. |
+
+Formats are unchanged: PNG, density mask, JSON, SVG, optional heightmap (`H` / `Y`). The card lists those names; heightmap stays a key toggle.
+
+PNG / mask / SVG / `density_u8` are written at the chosen output size. JSON also records `export_aspect`, `export_fit`, `export_preset`, `source_width`, and `source_height`.
+
 ## Thickness
 
 - Bottom **two-ended slider**: center follows cursor depth along the snapped axis; drag either handle to grow N / box thickness (always symmetric).
@@ -47,15 +64,15 @@ Stem: `exports/pycelium_<YYYYMMDD_HHMMSS>_<axis>_<squash|rich>.*`
 | `.png` | Density / biomass view (teal hypha + rust soluble C, same look as the inset) |
 | `_mask.png` | Greyscale density mask (max-normalized) for later texture / material use |
 | `_height.png` | Optional. Greyscale along the chosen domain axis (black↔white). `H` / `Y`. |
-| `.json` | `pycelium-slice-v1`: grid meta, axis, thickness, stats, `density_u8`, rich `samples` |
+| `.json` | `pycelium-slice-v1`: grid meta, axis, thickness, stats, `density_u8`, rich `samples`, plus `export_aspect` / `export_fit` / `export_preset` / source size |
 | `.svg` | Marching-squares contours of high-density regions |
 
 ## CLI
 
 ```bash
 cargo run -p pycelium-win --release -- --preset demo
-# E enter capture   hover a face   C rich/2D   Enter write
+# E enter capture   hover a face   C rich/2D   S settings   Enter write
 cargo run -p pycelium-win --release -- --export-dir D:\captures
 ```
 
-`--export-dir` does not change RAM / GPU presets. `--bench` stays headless and does not export.
+`--export-dir` does not change RAM / GPU presets. `--bench` stays headless and does not export. Export size is chosen in the capture settings card (default 512×512 square), not from the CLI.

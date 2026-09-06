@@ -454,6 +454,7 @@ impl MyceliumGpu {
         label_fade: f32,
         has_picked: bool,
         cutter: [f32; 4],
+        export_ui: [f32; 4],
     ) {
         let present = PresentUniforms {
             width: self.width,
@@ -488,6 +489,7 @@ impl MyceliumGpu {
             slice_oy: self.slice.oy,
             hud_ui: [cursor[0], cursor[1], label_density, label_fade],
             cutter,
+            export_ui,
         };
         queue.write_buffer(&self.present_buf, 0, bytemuck::bytes_of(&present));
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {

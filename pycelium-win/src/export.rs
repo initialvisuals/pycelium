@@ -401,10 +401,10 @@ pub fn write_exports_with_meta(
     let json = dir.join(format!("{stem}.json"));
     let svg = dir.join(format!("{stem}.svg"));
     let mask = dir.join(format!("{stem}_mask.png"));
-    let write_png = settings.map(|s| s.write_png).unwrap_or(true);
-    let write_mask = settings.map(|s| s.write_mask).unwrap_or(true);
-    let write_json = settings.map(|s| s.write_json).unwrap_or(true);
-    let write_svg = settings.map(|s| s.write_svg).unwrap_or(true);
+    let want_png = settings.map(|s| s.write_png).unwrap_or(true);
+    let want_mask = settings.map(|s| s.write_mask).unwrap_or(true);
+    let want_json = settings.map(|s| s.write_json).unwrap_or(true);
+    let want_svg = settings.map(|s| s.write_svg).unwrap_or(true);
     let write_height = settings
         .map(|s| s.write_heightmap)
         .unwrap_or(cutter.export_heightmap)
@@ -415,19 +415,19 @@ pub fn write_exports_with_meta(
         None
     };
 
-    if write_png {
+    if want_png {
         write_density_png(&png, plane)?;
     }
-    if write_mask {
+    if want_mask {
         write_mask_png(&mask, plane)?;
     }
     if let Some(ref hpath) = height {
         write_height_png(hpath, plane)?;
     }
-    if write_svg {
+    if want_svg {
         write_svg(&svg, plane)?;
     }
-    if write_json {
+    if want_json {
         write_json(&json, plane, cutter, grid, stamp, settings, source)?;
     }
 

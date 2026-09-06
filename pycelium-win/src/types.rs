@@ -346,13 +346,18 @@ mod tests {
         let mut s = SliceView::new(40);
         s.set_depth_normalized(0.0, 40.0);
         assert!((s.z - 1.0).abs() < 1e-5);
+        assert!((s.depth_normalized(40.0) - 0.0).abs() < 1e-5);
         s.set_depth_normalized(1.0, 40.0);
         assert!((s.z - 38.0).abs() < 1e-5);
+        assert!((s.depth_normalized(40.0) - 1.0).abs() < 1e-5);
         s.set_thickness_normalized(0.0, 40.0);
         assert!((s.thickness - 1.0).abs() < 1e-5);
+        assert!((s.thickness_normalized(40.0) - 0.0).abs() < 1e-5);
         s.set_zoom_normalized(0.0);
         assert!((s.zoom - 0.12).abs() < 1e-5);
+        assert!((s.zoom_normalized() - 0.0).abs() < 1e-5);
         s.set_zoom_normalized(1.0);
         assert!((s.zoom - 1.0).abs() < 1e-5);
+        assert!((s.zoom_normalized() - 1.0).abs() < 1e-5);
     }
 }

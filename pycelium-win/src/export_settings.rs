@@ -505,5 +505,8 @@ mod tests {
         s.write_svg = false;
         // native+crop+png+mask+json+height = 1+2+4+8+16+64 = 95
         assert_eq!(s.present_vec(), [1.0, 3.0, 95.0, 0.0]);
+        assert!(s.format_on(ExportFormat::Png));
+        assert!(!s.format_on(ExportFormat::Svg));
+        assert_eq!(ExportFormat::Heightmap.as_str(), "heightmap");
     }
 }

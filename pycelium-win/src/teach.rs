@@ -125,17 +125,6 @@ pub enum HudSlider {
     Param,
 }
 
-impl HudSlider {
-    pub fn keys(self) -> &'static str {
-        match self {
-            Self::SliceZ => "[ ] DEPTH  SHIFT COARSE",
-            Self::Thick => "; ' THICK  SHIFT COARSE",
-            Self::Zoom => ", . ZOOM  SHIFT COARSE",
-            Self::Param => "1-8 SELECT  -/= NUDGE",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NudgeKind {
     Param,

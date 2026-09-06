@@ -28,7 +28,7 @@ use crate::export::{apply_export_layout, extract_slice, utc_stamp, write_exports
 use crate::export_settings::ExportSettings;
 use crate::gpu::{GpuDevice, MyceliumGpu};
 use crate::memory::HostWorld;
-use crate::teach::HoverId;
+use crate::teach::{HoverId, HudSlider, NudgeKind, NudgeToast};
 use crate::types::SimUniforms;
 
 enum AppAction {
@@ -82,6 +82,22 @@ struct Runtime {
     scheme_fade: f32,
     tip_fade: f32,
     last_hover: HoverId,
+    nudge: Option<LiveNudge>,
+    hud_drag: Option<HudDrag>,
+}
+
+struct LiveNudge {
+    kind: NudgeKind,
+    title: String,
+    old: String,
+    new: String,
+    last: Instant,
+}
+
+#[derive(Clone)]
+struct HudDrag {
+    slider: HudSlider,
+    start: String,
 }
 
 struct App {
@@ -238,6 +254,8 @@ impl ApplicationHandler<AppAction> for App {
                 scheme_fade: 0.0,
                 tip_fade: 0.0,
                 last_hover: HoverId::None,
+                nudge: None,
+                hud_drag: None,
             })));
         });
     }
@@ -301,12 +319,19 @@ impl ApplicationHandler<AppAction> for App {
                     (x as f32 / rt.config.width as f32).clamp(0.0, 1.0),
                     (y as f32 / rt.config.height as f32).clamp(0.0, 1.0),
                 );
+                if let Some(drag) = rt.hud_drag.clone() {
+                    apply_hud_slider(rt, drag.slider, rt.cursor.0, &drag.start);
+                    rt.window.request_redraw();
+                }
                 if rt.cutter.active {
                     let axis_n = rt.cutter.axis.size(rt.sim.width, rt.sim.height, rt.sim.depth)
                         as f32;
                     if rt.cutter.dragging.is_some() {
                         rt.cutter.drag_handle(rt.cursor, axis_n);
-                    } else if !rt.orbit.dragging && !rt.export.contains_cursor(rt.cursor) {
+                    } else if !rt.orbit.dragging
+                        && rt.hud_drag.is_none()
+                        && !rt.export.contains_cursor(rt.cursor)
+                    {
                         let (eye, target) = rt.orbit.eye_target();
                         let rd = click_dir(
                             rt.cursor,
@@ -327,10 +352,69 @@ impl ApplicationHandler<AppAction> for App {
                         rt.orbit.last = None;
                         return;
                     }
+                    if state == ElementState::Pressed {
+                        if let Some(slider) = teach::hud_slider_at(rt.cursor) {
+                            let start = match slider {
+                                HudSlider::SliceZ => fmt_slice_z(rt.sim.slice.z),
+                                HudSlider::Thick => fmt_thick(rt.sim.slice.thickness),
+                                HudSlider::Zoom => fmt_zoom(rt.sim.slice.zoom),
+                                HudSlider::Param => fmt_param(
+                                    rt.sim.param_slot,
+                                    rt.sim.uniforms.param_value(rt.sim.param_slot),
+                                ),
+                            };
+                            if rt.cursor.0 >= teach::SLIDER_TRACK_X0 {
+                                apply_hud_slider(rt, slider, rt.cursor.0, &start);
+                            } else {
+                                match slider {
+                                    HudSlider::SliceZ => fire_nudge(
+                                        rt,
+                                        NudgeKind::SliceZ,
+                                        "SLICE Z".into(),
+                                        start.clone(),
+                                        start.clone(),
+                                    ),
+                                    HudSlider::Thick => fire_nudge(
+                                        rt,
+                                        NudgeKind::Thick,
+                                        "THICK".into(),
+                                        start.clone(),
+                                        start.clone(),
+                                    ),
+                                    HudSlider::Zoom => fire_nudge(
+                                        rt,
+                                        NudgeKind::Zoom,
+                                        "ZOOM".into(),
+                                        start.clone(),
+                                        start.clone(),
+                                    ),
+                                    HudSlider::Param => fire_nudge(
+                                        rt,
+                                        NudgeKind::Param,
+                                        param_title(rt.sim.param_slot),
+                                        start.clone(),
+                                        start.clone(),
+                                    ),
+                                }
+                            }
+                            rt.hud_drag = Some(HudDrag { slider, start });
+                            rt.orbit.dragging = false;
+                            rt.orbit.last = None;
+                            rt.window.request_redraw();
+                            return;
+                        }
+                    }
+                    if state == ElementState::Released && rt.hud_drag.is_some() {
+                        rt.hud_drag = None;
+                        rt.orbit.dragging = false;
+                        rt.orbit.last = None;
+                        return;
+                    }
                     if state == ElementState::Pressed && rt.cutter.active {
                         if rt.export.contains_cursor(rt.cursor) {
                             if let Some(hit) = rt.export.hit(rt.cursor) {
                                 rt.export.apply_hit(hit);
+                                rt.cutter.export_heightmap = rt.export.write_heightmap;
                                 println!("{}", rt.export.describe());
                             }
                             rt.orbit.dragging = false;
@@ -396,6 +480,10 @@ impl ApplicationHandler<AppAction> for App {
                 }
                 let max_z = rt.sim.depth as f32;
                 let step = if rt.shift { 8.0 } else { 1.0 };
+                let old_z = fmt_slice_z(rt.sim.slice.z);
+                let old_thick = fmt_thick(rt.sim.slice.thickness);
+                let old_zoom = fmt_zoom(rt.sim.slice.zoom);
+                let old_pan = fmt_pan(rt.sim.slice.ox, rt.sim.slice.oy);
                 let slice_key = match &logical_key {
                     Key::Character(c) if c == "[" => {
                         rt.sim.slice.nudge_depth(-step, max_z);
@@ -441,12 +529,53 @@ impl ApplicationHandler<AppAction> for App {
                 };
                 if slice_key {
                     rt.sim.uniforms.slice_z = rt.sim.slice.z;
+                    let (kind, title, old, value) = match &logical_key {
+                        Key::Character(c) if c == "[" || c == "]" => (
+                            NudgeKind::SliceZ,
+                            "SLICE Z".into(),
+                            old_z,
+                            fmt_slice_z(rt.sim.slice.z),
+                        ),
+                        Key::Character(c) if c == ";" || c == "'" => (
+                            NudgeKind::Thick,
+                            "THICK".into(),
+                            old_thick,
+                            fmt_thick(rt.sim.slice.thickness),
+                        ),
+                        Key::Character(c) if c == "," || c == "." => (
+                            NudgeKind::Zoom,
+                            "ZOOM".into(),
+                            old_zoom,
+                            fmt_zoom(rt.sim.slice.zoom),
+                        ),
+                        _ => (
+                            NudgeKind::Pan,
+                            "PAN".into(),
+                            old_pan,
+                            fmt_pan(rt.sim.slice.ox, rt.sim.slice.oy),
+                        ),
+                    };
+                    fire_nudge(rt, kind, title, old, value);
                     rt.window.set_title(&format!(
                         "Pycelium 3D | slice Z {:.0}  thick {:.0}  field {:.0}%",
                         rt.sim.slice.z,
                         rt.sim.slice.thickness,
                         rt.sim.slice.zoom * 100.0
                     ));
+                    rt.window.request_redraw();
+                    return;
+                }
+                let param_nudge = match &logical_key {
+                    Key::Character(c) if c == "-" || c == "_" => Some(-0.04),
+                    Key::Character(c) if c == "=" || c == "+" => Some(0.04),
+                    _ => None,
+                };
+                if let Some(delta) = param_nudge {
+                    let slot = rt.sim.param_slot;
+                    let old = fmt_param(slot, rt.sim.uniforms.param_value(slot));
+                    rt.sim.adjust_param(delta);
+                    let new = fmt_param(slot, rt.sim.uniforms.param_value(slot));
+                    fire_nudge(rt, NudgeKind::Param, param_title(slot), old, new);
                     rt.window.request_redraw();
                     return;
                 }
@@ -532,11 +661,15 @@ impl ApplicationHandler<AppAction> for App {
                         rt.window.request_redraw();
                     }
                     Key::Character(c) if c.eq_ignore_ascii_case("m") && rt.cutter.active => {
-                        rt.cutter.export_heightmap = !rt.cutter.export_heightmap;
+                        rt.export.toggle_format(crate::export_settings::ExportFormat::Heightmap);
+                        rt.cutter.export_heightmap = rt.export.write_heightmap;
                         println!("{}", rt.cutter.describe());
+                        println!("{}", rt.export.describe());
                     }
                     Key::Character(c) if c.eq_ignore_ascii_case("y") && rt.cutter.active => {
                         rt.cutter.cycle_heightmap_axis();
+                        rt.export.write_heightmap = true;
+                        rt.cutter.export_heightmap = true;
                         println!("{}", rt.cutter.describe());
                     }
                     Key::Named(NamedKey::Space) => rt.paused = !rt.paused,
@@ -550,17 +683,27 @@ impl ApplicationHandler<AppAction> for App {
                     Key::Character(c) if c.eq_ignore_ascii_case("d") => {
                         rt.plan.drift = !rt.plan.drift;
                     }
-                    Key::Character(c) if c == "-" || c == "_" => rt.sim.adjust_param(-0.04),
-                    Key::Character(c) if c == "=" || c == "+" => rt.sim.adjust_param(0.04),
                     Key::Character(c) => {
                         if let Some(d) = c.chars().next().and_then(|ch| ch.to_digit(10)) {
                             if (1..=8).contains(&d) {
                                 rt.sim.param_slot = d - 1;
+                                let v = fmt_param(
+                                    rt.sim.param_slot,
+                                    rt.sim.uniforms.param_value(rt.sim.param_slot),
+                                );
+                                fire_nudge(
+                                    rt,
+                                    NudgeKind::Param,
+                                    param_title(rt.sim.param_slot),
+                                    v.clone(),
+                                    v.clone(),
+                                );
                                 println!(
                                     "param {} = {:.4}",
                                     SimUniforms::param_name(rt.sim.param_slot),
                                     rt.sim.uniforms.param_value(rt.sim.param_slot)
                                 );
+                                rt.window.request_redraw();
                             }
                         }
                     }
@@ -646,6 +789,10 @@ impl ApplicationHandler<AppAction> for App {
                         if rt.tip_fade <= 0.01 && hover == HoverId::None {
                             rt.last_hover = HoverId::None;
                         }
+                        let toast = current_nudge(rt);
+                        if toast.is_none() {
+                            rt.nudge = None;
+                        }
                         let overlay = teach::pack_overlay(
                             rt.scheme_visible || rt.scheme_fade > 0.01,
                             rt.export.panel_open,
@@ -659,6 +806,7 @@ impl ApplicationHandler<AppAction> for App {
                             anchor,
                             rt.scheme_fade,
                             rt.tip_fade,
+                            toast.as_ref(),
                         );
                         rt.sim.render(
                             &rt.gpu.device,
@@ -713,7 +861,7 @@ impl ApplicationHandler<AppAction> for App {
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(rt) = &self.runtime {
-            if !rt.paused {
+            if !rt.paused || rt.nudge.is_some() || rt.scheme_fade > 0.01 || rt.tip_fade > 0.01 {
                 rt.window.request_redraw();
             }
         }
@@ -748,6 +896,120 @@ fn export_slice(rt: &Runtime) -> anyhow::Result<()> {
         println!("heightmap {}", h.display());
     }
     Ok(())
+}
+
+fn fmt_param(slot: u32, value: f32) -> String {
+    match slot % 8 {
+        4 | 5 => format!("{value:.4}"),
+        _ => format!("{value:.2}"),
+    }
+}
+
+fn fmt_slice_z(z: f32) -> String {
+    format!("{z:.0}")
+}
+
+fn fmt_thick(t: f32) -> String {
+    format!("{t:.0}")
+}
+
+fn fmt_zoom(z: f32) -> String {
+    format!("{:.0}", z * 100.0)
+}
+
+fn fmt_pan(ox: f32, oy: f32) -> String {
+    format!("{:.0}  {:.0}", ox * 100.0, oy * 100.0)
+}
+
+fn param_title(slot: u32) -> String {
+    format!(
+        "{} {}",
+        slot % 8 + 1,
+        SimUniforms::param_name(slot).replace('_', " ")
+    )
+}
+
+fn fire_nudge(rt: &mut Runtime, kind: NudgeKind, title: String, old: String, new: String) {
+    rt.nudge = Some(LiveNudge {
+        kind,
+        title,
+        old,
+        new,
+        last: Instant::now(),
+    });
+}
+
+fn current_nudge(rt: &Runtime) -> Option<NudgeToast> {
+    let n = rt.nudge.as_ref()?;
+    let idle = n.last.elapsed().as_secs_f32();
+    let fade = if idle < 1.15 {
+        1.0
+    } else {
+        (1.0 - (idle - 1.15) / 0.45).clamp(0.0, 1.0)
+    };
+    if fade <= 0.004 {
+        return None;
+    }
+    let value = if n.old == n.new {
+        n.new.clone()
+    } else {
+        format!("{} TO {}", n.old, n.new)
+    };
+    Some(NudgeToast {
+        kind: n.kind,
+        title: n.title.to_ascii_uppercase(),
+        value,
+        keys: n.kind.keys().to_string(),
+        fade,
+    })
+}
+
+fn apply_hud_slider(rt: &mut Runtime, slider: HudSlider, x: f32, start: &str) {
+    let t = teach::slider_t(x);
+    let max_z = rt.sim.depth as f32;
+    match slider {
+        HudSlider::SliceZ => {
+            rt.sim.slice.set_depth_normalized(t, max_z);
+            rt.sim.uniforms.slice_z = rt.sim.slice.z;
+            fire_nudge(
+                rt,
+                NudgeKind::SliceZ,
+                "SLICE Z".into(),
+                start.to_string(),
+                fmt_slice_z(rt.sim.slice.z),
+            );
+        }
+        HudSlider::Thick => {
+            rt.sim.slice.set_thickness_normalized(t, max_z);
+            fire_nudge(
+                rt,
+                NudgeKind::Thick,
+                "THICK".into(),
+                start.to_string(),
+                fmt_thick(rt.sim.slice.thickness),
+            );
+        }
+        HudSlider::Zoom => {
+            rt.sim.slice.set_zoom_normalized(t);
+            fire_nudge(
+                rt,
+                NudgeKind::Zoom,
+                "ZOOM".into(),
+                start.to_string(),
+                fmt_zoom(rt.sim.slice.zoom),
+            );
+        }
+        HudSlider::Param => {
+            rt.sim.set_param_normalized(t);
+            fire_nudge(
+                rt,
+                NudgeKind::Param,
+                param_title(rt.sim.param_slot),
+                start.to_string(),
+                fmt_param(rt.sim.param_slot, rt.sim.uniforms.param_value(rt.sim.param_slot)),
+            );
+        }
+    }
 }
 
 fn click_dir(

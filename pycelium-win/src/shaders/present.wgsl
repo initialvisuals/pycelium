@@ -47,6 +47,7 @@ struct PresentUniforms {
     help_rect: vec4<f32>,
     tip_rect: vec4<f32>,
     callout: vec4<f32>,
+    nudge_rect: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> u: PresentUniforms;
@@ -66,6 +67,9 @@ const HELP_ROWS: i32 = 22;
 const TIP_COLS: i32 = 36;
 const TIP_ROWS: i32 = 8;
 const TIP_BASE: i32 = 572;
+const NUDGE_COLS: i32 = 28;
+const NUDGE_ROWS: i32 = 3;
+const NUDGE_BASE: i32 = 860;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -171,6 +175,51 @@ fn bar(uv: vec2<f32>, origin: vec2<f32>, fill: f32, rgb: vec3<f32>) -> vec3<f32>
     let edge = step(0.0, local.x) * step(local.x, 1.0) * step(0.0, local.y) * step(local.y, 1.0);
     let body = select(vec3<f32>(0.08, 0.09, 0.10), rgb, local.x < clamp(fill, 0.0, 1.0));
     return body * edge;
+}
+
+// House chrome slider: thin white frame, 1–2 px shadow, filled track + handle.
+fn knob(uv: vec2<f32>, origin: vec2<f32>, fill: f32, tint: vec3<f32>) -> vec3<f32> {
+    let size = vec2<f32>(0.118, 0.014);
+    let r0 = origin;
+    let r1 = origin + size;
+    if uv.x < r0.x || uv.x > r1.x || uv.y < r0.y || uv.y > r1.y {
+        return vec3<f32>(0.0);
+    }
+    let t = clamp((uv.x - r0.x) / size.x, 0.0, 1.0);
+    let f = clamp(fill, 0.0, 1.0);
+    var rgb = vec3<f32>(0.07, 0.075, 0.08);
+    if t <= f {
+        rgb = mix(tint * 0.22, tint, 0.72);
+    }
+    let p = px();
+    let handle = abs(t - f) < max(p.x / size.x * 2.0, 0.018);
+    if handle {
+        rgb = vec3<f32>(0.94, 0.95, 0.92);
+    }
+    rgb = mix(rgb, vec3<f32>(0.0, 0.0, 0.0), thin_frame(uv, r0 + p * 1.5, r1 + p * 1.5) * 0.40);
+    rgb = mix(rgb, vec3<f32>(0.92, 0.93, 0.90), thin_frame(uv, r0, r1));
+    return rgb;
+}
+
+// Must stay in lockstep with `SimUniforms::param_range`.
+fn param_fill(slot: f32, value: f32) -> f32 {
+    let s = i32(slot + 0.5);
+    if s == 0 || s == 1 || s == 2 {
+        return clamp(value / 3.0, 0.0, 1.0);
+    }
+    if s == 3 {
+        return clamp((value - 0.2) / 2.8, 0.0, 1.0);
+    }
+    if s == 4 {
+        return clamp(value / 0.02, 0.0, 1.0);
+    }
+    if s == 5 {
+        return clamp(value / 0.12, 0.0, 1.0);
+    }
+    if s == 6 {
+        return clamp((value - 0.1) / 1.9, 0.0, 1.0);
+    }
+    return clamp((value - 0.2) / 2.0, 0.0, 1.0);
 }
 
 fn px() -> vec2<f32> {
@@ -285,6 +334,9 @@ fn label_char(id: i32, slot: i32) -> i32 {
         }
         case 30: { // SVG
             switch slot { case 0: { return 19; } case 1: { return 22; } case 2: { return 7; } default: { return -1; } }
+        }
+        case 31: { // HEIGHT
+            switch slot { case 0: { return 8; } case 1: { return 5; } case 2: { return 9; } case 3: { return 7; } case 4: { return 8; } case 5: { return 20; } default: { return -1; } }
         }
         default: { return -1; }
     }
@@ -582,8 +634,8 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         let ex0 = 0.735;
         let ex1 = 0.985;
         let ey0 = 0.368;
-        let chip1 = 0.418;
-        let ey1 = select(chip1, 0.882, u.export_ui.x >= 0.5);
+        let chip1 = 0.412;
+        let ey1 = select(chip1, 0.848, u.export_ui.x >= 0.5);
         if uv.x >= ex0 && uv.x <= ex1 && uv.y >= ey0 && uv.y <= ey1 {
             let cursor = u.hud_ui.xy;
             let hover = cursor.x >= ex0 && cursor.x <= ex1 && cursor.y >= ey0 && cursor.y <= ey1;
@@ -594,57 +646,83 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             rgb = mix(rgb, card, 0.88);
             let frame = thin_frame(uv, vec2<f32>(ex0, ey0), vec2<f32>(ex1, ey1));
             rgb = mix(rgb, vec3<f32>(0.80, 0.78, 0.70), frame);
-            rgb = paint_label(uv, vec2<f32>(0.742, 0.378), 19, 1.0, rgb);
+            rgb = paint_label(uv, vec2<f32>(0.742, 0.376), 19, 1.0, rgb);
             let sizes = array<f32, 11>(8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0, 8192.0);
             let preset = i32(u.export_ui.y + 0.5);
             let pidx = clamp(preset, 0, 10);
-            var size_ink = draw_number_trim(uv, vec2<f32>(0.868, 0.382), sizes[pidx], 4);
+            var size_ink = draw_number_trim(uv, vec2<f32>(0.868, 0.380), sizes[pidx], 4);
             rgb = rgb + vec3<f32>(0.95, 0.72, 0.28) * size_ink;
             if u.export_ui.x >= 0.5 {
-                rgb = paint_label(uv, vec2<f32>(0.742, 0.424), 20, 0.85, rgb);
-                let row_h = 0.028;
-                let row0 = 0.448;
+                let flags = i32(u.export_ui.z + 0.5);
+                let native = (flags & 1) != 0;
+                let fit_crop = (flags & 2) != 0;
+                let png_on = (flags & 4) != 0;
+                let mask_on = (flags & 8) != 0;
+                let json_on = (flags & 16) != 0;
+                let svg_on = (flags & 32) != 0;
+                let ht_on = (flags & 64) != 0;
+                rgb = paint_label(uv, vec2<f32>(0.742, 0.416), 20, 0.85, rgb);
+                let row_h = 0.032;
+                let row0 = 0.440;
+                let mid = 0.5 * (ex0 + ex1);
                 for (var i = 0; i < 11; i++) {
-                    let y0 = row0 + f32(i) * row_h;
+                    let row = i / 2;
+                    let col = i % 2;
+                    let x0 = select(ex0, mid, col == 1);
+                    let x1 = select(mid, ex1, col == 1);
+                    let y0 = row0 + f32(row) * row_h;
                     let y1 = y0 + row_h;
                     let sel = i == pidx;
-                    if uv.y >= y0 && uv.y < y1 {
+                    if uv.x >= x0 && uv.x < x1 && uv.y >= y0 && uv.y < y1 {
                         var rowc = select(vec3<f32>(0.06, 0.06, 0.07), vec3<f32>(0.42, 0.20, 0.05), sel);
-                        if cursor.y >= y0 && cursor.y < y1 && cursor.x >= ex0 && cursor.x <= ex1 && !sel {
+                        if cursor.x >= x0 && cursor.x < x1 && cursor.y >= y0 && cursor.y < y1 && !sel {
                             rowc = vec3<f32>(0.10, 0.10, 0.11);
                         }
                         rgb = mix(rgb, rowc, 0.75);
                     }
-                    var ink = draw_number_trim(uv, vec2<f32>(0.802, y0 + 0.005), sizes[i], 4);
+                    var ink = draw_number_trim(uv, vec2<f32>(x0 + 0.018, y0 + 0.008), sizes[i], 4);
                     let tint = select(vec3<f32>(0.78, 0.80, 0.76), vec3<f32>(1.0, 0.72, 0.28), sel);
                     rgb = rgb + tint * ink;
                 }
-                rgb = paint_label(uv, vec2<f32>(0.742, 0.748), 21, 0.8, rgb);
-                let mid = 0.5 * (ex0 + ex1);
-                let fit_crop = u.export_ui.w >= 0.5;
-                let native = u.export_ui.z >= 0.5;
-                if uv.y >= 0.768 && uv.y <= 0.808 {
+                if uv.y >= 0.644 && uv.y <= 0.684 {
                     if uv.x < mid {
                         rgb = mix(rgb, select(vec3<f32>(0.07, 0.07, 0.08), vec3<f32>(0.42, 0.20, 0.05), !fit_crop), 0.7);
                     } else {
                         rgb = mix(rgb, select(vec3<f32>(0.07, 0.07, 0.08), vec3<f32>(0.42, 0.20, 0.05), fit_crop), 0.7);
                     }
                 }
-                rgb = paint_label(uv, vec2<f32>(0.742, 0.776), 22, select(0.55, 1.0, !fit_crop), rgb);
-                rgb = paint_label(uv, vec2<f32>(0.862, 0.776), 23, select(0.55, 1.0, fit_crop), rgb);
-                if uv.y >= 0.816 && uv.y <= 0.856 {
+                rgb = paint_label(uv, vec2<f32>(0.742, 0.652), 22, select(0.55, 1.0, !fit_crop), rgb);
+                rgb = paint_label(uv, vec2<f32>(0.868, 0.652), 23, select(0.55, 1.0, fit_crop), rgb);
+                if uv.y >= 0.692 && uv.y <= 0.732 {
                     if uv.x < mid {
                         rgb = mix(rgb, select(vec3<f32>(0.07, 0.07, 0.08), vec3<f32>(0.42, 0.20, 0.05), !native), 0.7);
                     } else {
                         rgb = mix(rgb, select(vec3<f32>(0.07, 0.07, 0.08), vec3<f32>(0.42, 0.20, 0.05), native), 0.7);
                     }
                 }
-                rgb = paint_label(uv, vec2<f32>(0.742, 0.824), 25, select(0.55, 1.0, !native), rgb);
-                rgb = paint_label(uv, vec2<f32>(0.862, 0.824), 26, select(0.55, 1.0, native), rgb);
-                rgb = paint_label(uv, vec2<f32>(0.742, 0.860), 27, 0.55, rgb);
-                rgb = paint_label(uv, vec2<f32>(0.802, 0.860), 28, 0.55, rgb);
-                rgb = paint_label(uv, vec2<f32>(0.862, 0.860), 29, 0.45, rgb);
-                rgb = paint_label(uv, vec2<f32>(0.922, 0.860), 30, 0.45, rgb);
+                rgb = paint_label(uv, vec2<f32>(0.742, 0.700), 25, select(0.55, 1.0, !native), rgb);
+                rgb = paint_label(uv, vec2<f32>(0.868, 0.700), 26, select(0.55, 1.0, native), rgb);
+                let fw = (ex1 - ex0) * 0.25;
+                let fmt_on = array<i32, 4>(
+                    select(0, 1, png_on),
+                    select(0, 1, mask_on),
+                    select(0, 1, json_on),
+                    select(0, 1, svg_on),
+                );
+                let fmt_id = array<i32, 4>(27, 28, 29, 30);
+                for (var f = 0; f < 4; f++) {
+                    let fx0 = ex0 + fw * f32(f);
+                    let fx1 = fx0 + fw;
+                    let on = fmt_on[f] != 0;
+                    if uv.x >= fx0 && uv.x < fx1 && uv.y >= 0.748 && uv.y <= 0.788 {
+                        rgb = mix(rgb, select(vec3<f32>(0.07, 0.07, 0.08), vec3<f32>(0.42, 0.20, 0.05), on), 0.7);
+                    }
+                    rgb = paint_label(uv, vec2<f32>(fx0 + 0.004, 0.756), fmt_id[f], select(0.45, 1.0, on), rgb);
+                }
+                if uv.y >= 0.796 && uv.y <= 0.836 {
+                    rgb = mix(rgb, select(vec3<f32>(0.07, 0.07, 0.08), vec3<f32>(0.42, 0.20, 0.05), ht_on), 0.7);
+                }
+                rgb = paint_label(uv, vec2<f32>(0.742, 0.804), 31, select(0.45, 1.0, ht_on), rgb);
             }
         }
     }
@@ -698,7 +776,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         ink = ink + draw_number(uv, vec2<f32>(0.168, 0.742), lineage, 3);
         ink = ink + draw_number(uv, vec2<f32>(0.168, 0.784), age, 5);
         ink = ink + draw_number(uv, vec2<f32>(0.168, 0.826), reserve * 100.0, 4);
-        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.896), u.param_slot, 1);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.896), u.param_slot + 1.0, 1);
         ink = ink + draw_number(uv, vec2<f32>(0.188, 0.896), u.param_value * 100.0, 4);
         rgb = rgb + vec3<f32>(0.70, 0.76, 0.72) * ink * 0.85;
         rgb = rgb + bar(uv, vec2<f32>(0.128, 0.312), hypha_f, teal);
@@ -707,6 +785,18 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         rgb = rgb + bar(uv, vec2<f32>(0.128, 0.438), soln_f, violet);
         rgb = rgb + bar(uv, vec2<f32>(0.128, 0.480), enz_f, green);
         rgb = rgb + bar(uv, vec2<f32>(0.128, 0.522), org_f, brown);
+        let zfill = clamp((u.slice_z - 1.0) / max(f32(u.depth) - 3.0, 1.0), 0.0, 1.0);
+        let tfill = clamp((u.slice_thickness - 1.0) / max(f32(u.depth) - 1.0, 1.0), 0.0, 1.0);
+        let zof = clamp((u.slice_zoom - 0.12) / 0.88, 0.0, 1.0);
+        let pfill = param_fill(u.param_slot, u.param_value);
+        let k0 = knob(uv, vec2<f32>(0.128, 0.576), zfill, warm);
+        let k1 = knob(uv, vec2<f32>(0.128, 0.618), tfill, warm);
+        let k2 = knob(uv, vec2<f32>(0.128, 0.662), zof, warm);
+        let k3 = knob(uv, vec2<f32>(0.128, 0.918), pfill, ice);
+        if k0.x + k0.y + k0.z > 0.0 { rgb = k0; }
+        if k1.x + k1.y + k1.z > 0.0 { rgb = k1; }
+        if k2.x + k2.y + k2.z > 0.0 { rgb = k2; }
+        if k3.x + k3.y + k3.z > 0.0 { rgb = k3; }
 
         rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.058), 0.85, ice);
         rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.100), clamp(live / 400000.0, 0.2, 1.0), teal);
@@ -782,6 +872,7 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 
     let help_fade = clamp(u.overlay_ui.x, 0.0, 1.0);
     let tip_fade = clamp(u.overlay_ui.y, 0.0, 1.0);
+    let nudge_fade = clamp(u.overlay_ui.z, 0.0, 1.0);
     if help_fade > 0.004 {
         let h0 = u.help_rect.xy;
         let h1 = u.help_rect.zw;
@@ -794,6 +885,12 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         let t1 = u.tip_rect.zw;
         rgb = paint_card(uv, t0, t1, tip_fade, rgb);
         rgb = paint_grid(uv, t0, t1, TIP_COLS, TIP_ROWS, TIP_BASE, tip_fade, rgb);
+    }
+    if nudge_fade > 0.004 {
+        let n0 = u.nudge_rect.xy;
+        let n1 = u.nudge_rect.zw;
+        rgb = paint_card(uv, n0, n1, nudge_fade, rgb);
+        rgb = paint_grid(uv, n0, n1, NUDGE_COLS, NUDGE_ROWS, NUDGE_BASE, nudge_fade, rgb);
     }
 
     return vec4<f32>(rgb, 1.0);

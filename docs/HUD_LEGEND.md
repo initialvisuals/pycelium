@@ -45,11 +45,11 @@ Fill is a strided voxel census (`hud_reduce`, every 4th cell). The box and bar s
 
 | Row | Box | English | Small digits | Meaning |
 |-----|-----|---------|--------------|---------|
-| 0.56 | warm | `SLICE Z` | 4 | orthogonal slab depth (voxels) |
-| 0.60 | warm | `THICK` | 3 | slab thickness |
-| 0.64 | warm | `ZOOM` | 3 | XY field as percent (`zoom * 100`) |
+| 0.56 | warm | `SLICE Z` | 4 | orthogonal slab depth (voxels) + slider |
+| 0.60 | warm | `THICK` | 3 | slab thickness + slider |
+| 0.64 | warm | `ZOOM` | 3 | XY field as percent (`zoom * 100`) + slider |
 
-Keys: `[ ]` depth, `; '` thickness, `, .` zoom, arrows pan. Shift = coarse.
+Keys: `[ ]` depth, `; '` thickness, `, .` zoom, arrows pan. Shift = coarse. Drag the framed track, or use the keys; a near-HUD toast shows the value and the keys while you tweak.
 
 ## Selected tip
 
@@ -68,9 +68,9 @@ After a pick, sparse mode keeps this block readable.
 
 | Row | Box | English | Small digits | Meaning |
 |-----|-----|---------|--------------|---------|
-| 0.90 | ice | `PARAM` | 1 + 4 | slot `1–8` and value × 100 |
+| 0.90 | ice | `PARAM` | 1 + 4 | slot `1–8` and value × 100 + slider |
 
-Slots: chemotropism, nitrotropism, autotropism, persistence, maintenance, enzyme_k, branch_cost, extension. Keys `1–8` select, `-` / `=` nudge.
+Slots: chemotropism, nitrotropism, autotropism, persistence, maintenance, enzyme_k, branch_cost, extension. Keys `1–8` select, `-` / `=` nudge, or drag the framed track. While adjusting, a toast shows **slot / name / old→new** and `1–8 select  -/= nudge`, then fades after a short idle.
 
 Slice **export** (face-aligned 2D squash / rich box) is a separate capture mode (`E`). It does not change these HUD rows. The export settings card (`S`) lives on the **right**, under the slab inset. See [SLICE_EXPORT.md](SLICE_EXPORT.md).
 
@@ -78,7 +78,7 @@ Slice **export** (face-aligned 2D squash / rich box) is a separate capture mode 
 
 **H** opens or hides the corner keybind panel (global, including during capture). Hover any left-HUD meter — FPS through PARAM — or a row on that panel for a verbose plain-English callout (sim meaning, plus terms such as anastomosis, chemotropism, soluble C/N, exoenzyme, cord). The popup sits near the mouse and is tied to the control with a thin white elbow / string (1–2 px shadow, no blur).
 
-Tab `off` still teaches if the cursor is on a color box or bar. If a future chrome piece has no hit box, teach cannot fire for it.
+Tab `off` still teaches if the cursor is on a color box, bar, or slider. Sliders stay drawn in every density mode (same as bars). If a future chrome piece has no hit box, teach cannot fire for it.
 
 Heightmap PNG write in capture is **M**, not H. **Y** still cycles the heightmap axis and turns that write on.
 

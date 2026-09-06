@@ -196,6 +196,8 @@ impl NudgeKind {
 
 #[derive(Clone, Debug)]
 pub struct NudgeToast {
+    /// Which meter this toast belongs to (also drives `keys` / `row_y` at the call site).
+    #[allow(dead_code)]
     pub kind: NudgeKind,
     pub title: String,
     pub value: String,
@@ -615,7 +617,7 @@ fn tip_text(id: HoverId) -> &'static str {
             "Internal carbon the picked tip is carrying (shown times 100). Extension and branching spend this. A starved tip stops growing even if soil food is nearby, until uptake refills it."
         }
         HoverId::Param | HoverId::ParamKeys => {
-            "Eight live knobs, each with its own left-HUD slider: chemotropism, nitrotropism, autotropism, persistence, maintenance, enzyme_k, branch cost, extension. Keys 1-8 select and focus. Minus and equals nudge the selected slot. Drag any track to set that value and select it."
+            "Eight left-HUD sliders: chemotropism, nitrotropism, autotropism, persistence, maintenance, enzyme_k, branch cost, extension. Keys 1-8 select. Minus and equals nudge the focused slot. Drag any track to set it and select it."
         }
         HoverId::ParamChemo => {
             "Chemotropism steers each tip toward soluble carbon, the rust SOL C field. High: tips hunt food plumes and bend hard toward litter. Low: they ignore C gradients and wander or follow persistence, nitrogen, or autotropism instead. Key 1. Drag the track or use minus and equals."
@@ -630,13 +632,13 @@ fn tip_text(id: HoverId) -> &'static str {
             "Persistence keeps the current heading versus turning to tropisms. High: long straight runs; the tip commits and only slowly bends. Low: twitchy steering, yanked by every nearby C, N, or self gradient. High persist plus high chemo still hunts, but in smoother arcs. Key 4."
         }
         HoverId::ParamMaint => {
-            "Maintenance is the carbon living biomass burns just to stay alive, even when not growing. High: the network is expensive; cords and hyphae drain internal C and can thin if unfed. Low: cheap upkeep, so a colony banks reserve and survives lean soil. A tax on existing walls, not tip steps. Key 5."
+            "Maintenance is the carbon living biomass burns just to stay alive. High: the network is expensive; cords and hyphae drain internal C and can thin if unfed. Low: cheap upkeep, so a colony banks reserve and survives lean soil. A tax on walls, not tip steps. Key 5."
         }
         HoverId::ParamEnzyme => {
-            "Enzyme_k scales how fast leaked exoenzyme cuts ORGANIC polymer into soluble C and N. High: litter unlocks quickly; SOL C and SOL N rise while the brown ORGANIC bar falls. Low: enzyme sits on uncleaved polymer and the meal stays wrapped. Outside digestion, not uptake at the tip. Key 6."
+            "Enzyme_k scales how fast leaked exoenzyme cuts ORGANIC polymer into soluble C and N. High: litter unlocks quickly; SOL C and SOL N rise while the brown ORGANIC bar falls. Low: enzyme sits on uncleaved polymer and the meal stays wrapped. This is outside digestion. Key 6."
         }
         HoverId::ParamBranch => {
-            "Branch cost is how much internal reserve a tip must hold before it can birth a side tip. High: forks are expensive; fewer branches, longer unbranched runs. Low: cheap forks, denser trees, more tips hunting litter, and more carbon spent on new heads. Watch the BRANCHES census. Key 7."
+            "Branch cost is how much reserve a tip must hold before it can birth a side tip. High: forks are expensive; fewer branches, longer unbranched runs. Low: cheap forks, denser trees, more tips hunting litter, and more carbon spent on new heads. Watch the BRANCHES census. Key 7."
         }
         HoverId::ParamExtend => {
             "Extension (max_extension) is how far a tip steps each tick when it has reserve. High: fast explorers that cover voxels quickly, but they can overshoot food and spend reserve faster. Low: short cautious steps; the colony creeps. Starved tips still take shorter steps. Key 8."

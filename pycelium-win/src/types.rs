@@ -125,6 +125,20 @@ impl SimUniforms {
         }
     }
 
+    /// Short left-HUD caption. Must stay in lockstep with `present.wgsl` label ids 32–39.
+    pub fn param_hud_label(slot: u32) -> &'static str {
+        match slot % 8 {
+            0 => "CHEMO",
+            1 => "NITRO",
+            2 => "AUTO",
+            3 => "PERSIST",
+            4 => "MAINT",
+            5 => "ENZYME_K",
+            6 => "BRANCH",
+            _ => "EXTEND",
+        }
+    }
+
     /// Inclusive knob range. Must stay in lockstep with `present.wgsl` `param_fill`.
     pub fn param_range(slot: u32) -> (f32, f32) {
         match slot % 8 {
@@ -230,6 +244,8 @@ pub struct PresentUniforms {
     pub callout: [f32; 4],
     /// Live nudge toast UV rect (x0,y0,x1,y1).
     pub nudge_rect: [f32; 4],
+    /// Normalized 0..1 fills for the eight left-HUD param sliders.
+    pub param_fills: [f32; 8],
 }
 
 /// Orthogonal section through the pedon. Depth is the plane; thickness is
@@ -323,7 +339,17 @@ mod tests {
     fn present_uniforms_stay_16_byte_aligned() {
         assert_eq!(std::mem::size_of::<PresentUniforms>() % 16, 0);
         assert!(std::mem::size_of::<PresentUniforms>() >= 176);
-        assert_eq!(std::mem::size_of::<PresentUniforms>(), 16 * 17);
+        assert_eq!(std::mem::size_of::<PresentUniforms>(), 16 * 19);
+    }
+
+    #[test]
+    fn param_hud_labels_fit_eight_glyphs() {
+        for slot in 0..8 {
+            assert!(SimUniforms::param_hud_label(slot).len() <= 8);
+        }
+        assert_eq!(SimUniforms::param_hud_label(0), "CHEMO");
+        assert_eq!(SimUniforms::param_hud_label(5), "ENZYME_K");
+        assert_eq!(SimUniforms::param_hud_label(7), "EXTEND");
     }
 
     #[test]

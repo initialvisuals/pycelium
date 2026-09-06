@@ -1,11 +1,15 @@
 mod config;
+mod cutter;
+mod export;
 mod gpu;
+mod hud_font;
 mod memory;
 mod model;
 mod types;
 
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use anyhow::Result;
 use clap::Parser;
@@ -17,6 +21,8 @@ use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
 use crate::config::{Args, LabelDensity, MemoryPlan};
+use crate::cutter::Cutter;
+use crate::export::{extract_slice, utc_stamp, write_exports};
 use crate::gpu::{GpuDevice, MyceliumGpu};
 use crate::memory::HostWorld;
 use crate::types::SimUniforms;
@@ -65,6 +71,8 @@ struct Runtime {
     shift: bool,
     labels: LabelDensity,
     label_fade: f32,
+    cutter: Cutter,
+    export_dir: PathBuf,
 }
 
 struct App {
@@ -73,6 +81,7 @@ struct App {
     world: Option<HostWorld>,
     runtime: Option<Runtime>,
     labels: LabelDensity,
+    export_dir: PathBuf,
 }
 
 fn main() -> Result<()> {
@@ -84,6 +93,7 @@ fn main() -> Result<()> {
 
     let world = HostWorld::commit(&plan)?;
     let labels = args.labels;
+    let export_dir = PathBuf::from(&args.export_dir);
 
     if let Some(frames) = args.bench {
         return run_bench(plan, world, frames);
@@ -96,6 +106,7 @@ fn main() -> Result<()> {
         world: Some(world),
         runtime: None,
         labels,
+        export_dir,
     };
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -151,6 +162,8 @@ impl ApplicationHandler<AppAction> for App {
         let world = self.world.take().expect("host world");
         let vsync = plan.vsync;
         let labels = self.labels;
+        let export_dir = self.export_dir.clone();
+        let cutter_depth = plan.gpu_depth;
 
         pollster::block_on(async move {
             let instance = wgpu::Instance::new(
@@ -209,6 +222,8 @@ impl ApplicationHandler<AppAction> for App {
                 shift: false,
                 labels,
                 label_fade: if labels == LabelDensity::Off { 0.0 } else { 1.0 },
+                cutter: Cutter::new(cutter_depth),
+                export_dir,
             })));
         });
     }
@@ -229,8 +244,11 @@ impl ApplicationHandler<AppAction> for App {
                 println!("[ ] depth | ; ' thickness | , . XY field | arrows pan slab | Shift = coarse");
                 println!("Space pause | R reseed | F litter | D drift | Esc quit");
                 println!(
-                    "Tab HUD labels ({}) | hover a meter to fade English | glyphs stay",
+                    "Tab HUD labels ({}) | white names + color boxes | hover in sparse",
                     self.runtime.as_ref().map(|r| r.labels.as_str()).unwrap_or("rich")
+                );
+                println!(
+                    "E capture | C 2D/rich | hover cube face to snap | drag slider handles | Enter export | Esc leave"
                 );
                 println!(
                     "HUD: FPS, tips, fusions, branches, C:N | bars | then slice Z / thickness / zoom% | selected tip"
@@ -268,12 +286,45 @@ impl ApplicationHandler<AppAction> for App {
                     (x as f32 / rt.config.width as f32).clamp(0.0, 1.0),
                     (y as f32 / rt.config.height as f32).clamp(0.0, 1.0),
                 );
+                if rt.cutter.active {
+                    let axis_n = rt.cutter.axis.size(rt.sim.width, rt.sim.height, rt.sim.depth)
+                        as f32;
+                    if rt.cutter.dragging.is_some() {
+                        rt.cutter.drag_handle(rt.cursor, axis_n);
+                    } else if !rt.orbit.dragging {
+                        let (eye, target) = rt.orbit.eye_target();
+                        let rd = click_dir(
+                            rt.cursor,
+                            rt.config.width,
+                            rt.config.height,
+                            eye,
+                            target,
+                        );
+                        rt.cutter.track_pointer(eye, rd, axis_n);
+                    }
+                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == MouseButton::Left {
+                    if state == ElementState::Pressed && rt.cutter.active {
+                        let axis_n = rt.cutter.axis.size(rt.sim.width, rt.sim.height, rt.sim.depth)
+                            as f32;
+                        if let Some(handle) = rt.cutter.hit_handle(rt.cursor, axis_n) {
+                            rt.cutter.dragging = Some(handle);
+                            rt.orbit.dragging = false;
+                            rt.orbit.last = None;
+                            return;
+                        }
+                    }
+                    if state == ElementState::Released && rt.cutter.dragging.is_some() {
+                        rt.cutter.dragging = None;
+                        rt.orbit.dragging = false;
+                        rt.orbit.last = None;
+                        return;
+                    }
                     rt.orbit.dragging = state == ElementState::Pressed;
                     rt.orbit.last = None;
-                    if state == ElementState::Released {
+                    if state == ElementState::Released && !rt.cutter.active {
                         rt.pending_pick = true;
                     }
                 }
@@ -283,7 +334,13 @@ impl ApplicationHandler<AppAction> for App {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 80.0,
                 };
-                rt.orbit.radius = (rt.orbit.radius - steps * 0.12).clamp(0.55, 4.5);
+                if rt.cutter.active && rt.shift {
+                    let axis_n = rt.cutter.axis.size(rt.sim.width, rt.sim.height, rt.sim.depth)
+                        as f32;
+                    rt.cutter.nudge_half(steps * if rt.shift { 2.0 } else { 1.0 }, axis_n);
+                } else {
+                    rt.orbit.radius = (rt.orbit.radius - steps * 0.12).clamp(0.55, 4.5);
+                }
             }
             WindowEvent::KeyboardInput {
                 event:
@@ -362,11 +419,56 @@ impl ApplicationHandler<AppAction> for App {
                     return;
                 }
                 match logical_key {
-                    Key::Named(NamedKey::Escape) => event_loop.exit(),
+                    Key::Named(NamedKey::Escape) => {
+                        if rt.cutter.active {
+                            rt.cutter.leave();
+                            println!("capture off");
+                            rt.window.request_redraw();
+                        } else {
+                            event_loop.exit();
+                        }
+                    }
+                    Key::Named(NamedKey::Enter) => {
+                        if rt.cutter.active {
+                            if let Err(err) = export_slice(rt) {
+                                eprintln!("slice export failed: {err:#}");
+                            }
+                        }
+                    }
                     Key::Named(NamedKey::Tab) => {
                         rt.labels = rt.labels.cycle();
                         println!("HUD labels: {}", rt.labels.as_str());
                         rt.window.request_redraw();
+                    }
+                    Key::Character(c) if c.eq_ignore_ascii_case("e") => {
+                        rt.cutter.toggle(rt.sim.slice.z, rt.sim.depth);
+                        if rt.cutter.active {
+                            println!("{}", rt.cutter.describe());
+                            println!(
+                                "C cycle 2D/rich | X axis | hover face center/mid-edge to snap | H heightmap | Y height axis | Shift+wheel thickness"
+                            );
+                        } else {
+                            println!("capture off");
+                        }
+                        rt.window.request_redraw();
+                    }
+                    Key::Character(c) if c.eq_ignore_ascii_case("c") && rt.cutter.active => {
+                        rt.cutter.cycle_mode();
+                        println!("{}", rt.cutter.describe());
+                        rt.window.request_redraw();
+                    }
+                    Key::Character(c) if c.eq_ignore_ascii_case("x") && rt.cutter.active => {
+                        rt.cutter.cycle_axis();
+                        println!("{}", rt.cutter.describe());
+                        rt.window.request_redraw();
+                    }
+                    Key::Character(c) if c.eq_ignore_ascii_case("h") && rt.cutter.active => {
+                        rt.cutter.export_heightmap = !rt.cutter.export_heightmap;
+                        println!("{}", rt.cutter.describe());
+                    }
+                    Key::Character(c) if c.eq_ignore_ascii_case("y") && rt.cutter.active => {
+                        rt.cutter.cycle_heightmap_axis();
+                        println!("{}", rt.cutter.describe());
                     }
                     Key::Named(NamedKey::Space) => rt.paused = !rt.paused,
                     Key::Character(c) if c.eq_ignore_ascii_case("r") => {
@@ -443,6 +545,12 @@ impl ApplicationHandler<AppAction> for App {
                         if (rt.label_fade - fade_target).abs() < 0.01 {
                             rt.label_fade = fade_target;
                         }
+                        if rt.cutter.active {
+                            rt.window.set_title(&format!(
+                                "Pycelium 3D | {}",
+                                rt.cutter.describe()
+                            ));
+                        }
                         rt.sim.render(
                             &rt.gpu.device,
                             &rt.gpu.queue,
@@ -456,6 +564,7 @@ impl ApplicationHandler<AppAction> for App {
                             rt.labels.as_f32(),
                             rt.label_fade,
                             rt.has_picked,
+                            rt.cutter.present_vec(),
                         );
                         rt.window.pre_present_notify();
                         rt.gpu.queue.present(frame);
@@ -472,15 +581,17 @@ impl ApplicationHandler<AppAction> for App {
                     rt.fps = rt.frames as f32 / dt;
                     rt.frames = 0;
                     rt.fps_mark = Instant::now();
-                    rt.window.set_title(&format!(
-                        "Pycelium 3D | {:.0} FPS | {}x{}x{} | {:.2} GiB | {}",
-                        rt.fps,
-                        rt.plan.gpu_width,
-                        rt.plan.gpu_height,
-                        rt.plan.gpu_depth,
-                        rt.world.committed_bytes() as f64 / 1024.0 / 1024.0 / 1024.0,
-                        rt.gpu.describe()
-                    ));
+                    if !rt.cutter.active {
+                        rt.window.set_title(&format!(
+                            "Pycelium 3D | {:.0} FPS | {}x{}x{} | {:.2} GiB | {}",
+                            rt.fps,
+                            rt.plan.gpu_width,
+                            rt.plan.gpu_height,
+                            rt.plan.gpu_depth,
+                            rt.world.committed_bytes() as f64 / 1024.0 / 1024.0 / 1024.0,
+                            rt.gpu.describe()
+                        ));
+                    }
                 }
                 rt.window.request_redraw();
             }
@@ -496,6 +607,32 @@ impl ApplicationHandler<AppAction> for App {
             }
         }
     }
+}
+
+fn export_slice(rt: &Runtime) -> anyhow::Result<()> {
+    let vol = rt
+        .sim
+        .read_volume_fields(&rt.gpu.device, &rt.gpu.queue)?;
+    let plane = extract_slice(&vol, &rt.cutter, rt.cutter.mode == crate::cutter::CaptureMode::RichBox);
+    let stamp = utc_stamp(SystemTime::now());
+    let paths = write_exports(
+        &rt.export_dir,
+        &plane,
+        &rt.cutter,
+        (rt.sim.width, rt.sim.height, rt.sim.depth),
+        &stamp,
+    )?;
+    println!(
+        "exported {}  {}  {}  {}",
+        paths.png.display(),
+        paths.json.display(),
+        paths.svg.display(),
+        paths.mask.display()
+    );
+    if let Some(h) = paths.height {
+        println!("heightmap {}", h.display());
+    }
+    Ok(())
 }
 
 fn click_dir(

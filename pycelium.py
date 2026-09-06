@@ -1,3 +1,5 @@
+# Classic ASCII dish. For the Windows GPU build:
+#   cargo run --release -p pycelium-win
 import random
 import time
 import os

@@ -6,6 +6,7 @@ mod gpu;
 mod hud_font;
 mod memory;
 mod model;
+mod teach;
 mod types;
 
 use std::path::PathBuf;
@@ -27,6 +28,7 @@ use crate::export::{apply_export_layout, extract_slice, utc_stamp, write_exports
 use crate::export_settings::ExportSettings;
 use crate::gpu::{GpuDevice, MyceliumGpu};
 use crate::memory::HostWorld;
+use crate::teach::HoverId;
 use crate::types::SimUniforms;
 
 enum AppAction {
@@ -76,6 +78,10 @@ struct Runtime {
     cutter: Cutter,
     export: ExportSettings,
     export_dir: PathBuf,
+    scheme_visible: bool,
+    scheme_fade: f32,
+    tip_fade: f32,
+    last_hover: HoverId,
 }
 
 struct App {
@@ -228,6 +234,10 @@ impl ApplicationHandler<AppAction> for App {
                 cutter: Cutter::new(cutter_depth),
                 export: ExportSettings::default(),
                 export_dir,
+                scheme_visible: false,
+                scheme_fade: 0.0,
+                tip_fade: 0.0,
+                last_hover: HoverId::None,
             })));
         });
     }
@@ -257,6 +267,7 @@ impl ApplicationHandler<AppAction> for App {
                 println!(
                     "HUD: FPS, tips, fusions, branches, C:N | bars | then slice Z / thickness / zoom% | selected tip"
                 );
+                println!("H control scheme | hover a meter or scheme row for a teach callout");
             }
         }
     }
@@ -310,6 +321,12 @@ impl ApplicationHandler<AppAction> for App {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == MouseButton::Left {
+                    let scheme_rect = teach::scheme_rect(rt.export.panel_open && rt.cutter.active);
+                    if rt.scheme_visible && teach::in_rect(rt.cursor, scheme_rect) {
+                        rt.orbit.dragging = false;
+                        rt.orbit.last = None;
+                        return;
+                    }
                     if state == ElementState::Pressed && rt.cutter.active {
                         if rt.export.contains_cursor(rt.cursor) {
                             if let Some(hit) = rt.export.hit(rt.cursor) {
@@ -469,7 +486,7 @@ impl ApplicationHandler<AppAction> for App {
                             println!("{}", rt.cutter.describe());
                             println!("{}", rt.export.describe());
                             println!(
-                                "C cycle 2D/rich | S settings | X axis | hover face center/mid-edge to snap | H heightmap | Y height axis | Shift+wheel thickness"
+                                "C cycle 2D/rich | S settings | X axis | hover face center/mid-edge to snap | M heightmap | Y height axis | H scheme | Shift+wheel thickness"
                             );
                         } else {
                             rt.export.close_panel();
@@ -506,7 +523,15 @@ impl ApplicationHandler<AppAction> for App {
                         println!("{}", rt.cutter.describe());
                         rt.window.request_redraw();
                     }
-                    Key::Character(c) if c.eq_ignore_ascii_case("h") && rt.cutter.active => {
+                    Key::Character(c) if c.eq_ignore_ascii_case("h") => {
+                        rt.scheme_visible = !rt.scheme_visible;
+                        println!(
+                            "control scheme {}",
+                            if rt.scheme_visible { "on" } else { "off" }
+                        );
+                        rt.window.request_redraw();
+                    }
+                    Key::Character(c) if c.eq_ignore_ascii_case("m") && rt.cutter.active => {
                         rt.cutter.export_heightmap = !rt.cutter.export_heightmap;
                         println!("{}", rt.cutter.describe());
                     }
@@ -596,6 +621,45 @@ impl ApplicationHandler<AppAction> for App {
                                 rt.export.describe()
                             ));
                         }
+                        let help_target = if rt.scheme_visible { 1.0 } else { 0.0 };
+                        rt.scheme_fade += (help_target - rt.scheme_fade) * 0.28;
+                        if (rt.scheme_fade - help_target).abs() < 0.01 {
+                            rt.scheme_fade = help_target;
+                        }
+                        let (hover, anchor) = teach::hit_test(
+                            rt.cursor,
+                            rt.scheme_visible,
+                            rt.cutter.active,
+                            rt.export.panel_open,
+                        );
+                        if hover != HoverId::None && hover != rt.last_hover {
+                            rt.tip_fade *= 0.18;
+                            rt.last_hover = hover;
+                        } else if hover != HoverId::None {
+                            rt.last_hover = hover;
+                        }
+                        let tip_target = if hover == HoverId::None { 0.0 } else { 1.0 };
+                        rt.tip_fade += (tip_target - rt.tip_fade) * 0.30;
+                        if (rt.tip_fade - tip_target).abs() < 0.01 {
+                            rt.tip_fade = tip_target;
+                        }
+                        if rt.tip_fade <= 0.01 && hover == HoverId::None {
+                            rt.last_hover = HoverId::None;
+                        }
+                        let overlay = teach::pack_overlay(
+                            rt.scheme_visible || rt.scheme_fade > 0.01,
+                            rt.export.panel_open,
+                            rt.cutter.active,
+                            if rt.tip_fade > 0.01 {
+                                rt.last_hover
+                            } else {
+                                HoverId::None
+                            },
+                            rt.cursor,
+                            anchor,
+                            rt.scheme_fade,
+                            rt.tip_fade,
+                        );
                         rt.sim.render(
                             &rt.gpu.device,
                             &rt.gpu.queue,
@@ -611,6 +675,7 @@ impl ApplicationHandler<AppAction> for App {
                             rt.has_picked,
                             rt.cutter.present_vec(),
                             rt.export.present_vec(),
+                            &overlay,
                         );
                         rt.window.pre_present_notify();
                         rt.gpu.queue.present(frame);

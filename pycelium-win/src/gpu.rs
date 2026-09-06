@@ -387,6 +387,10 @@ impl MyceliumGpu {
         eye: [f32; 3],
         target: [f32; 3],
         fps: f32,
+        cursor: [f32; 2],
+        label_density: f32,
+        label_fade: f32,
+        has_picked: bool,
     ) {
         let present = PresentUniforms {
             width: self.width,
@@ -407,7 +411,7 @@ impl MyceliumGpu {
             internal_c: 0.0,
             enzyme: 0.0,
             organic: 0.0,
-            selected_id: self.last_pick as f32,
+            selected_id: if has_picked { 1.0 } else { 0.0 },
             selected_lineage: 0.0,
             selected_age: 0.0,
             selected_reserve: 0.0,
@@ -419,6 +423,7 @@ impl MyceliumGpu {
             slice_zoom: self.slice.zoom,
             slice_ox: self.slice.ox,
             slice_oy: self.slice.oy,
+            hud_ui: [cursor[0], cursor[1], label_density, label_fade],
         };
         queue.write_buffer(&self.present_buf, 0, bytemuck::bytes_of(&present));
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -533,6 +538,22 @@ fn storage_entry(
             min_binding_size: None,
         },
         count: None,
+    }
+}
+
+#[cfg(test)]
+mod shader_tests {
+    #[test]
+    fn present_wgsl_parses_and_validates() {
+        let src = include_str!("shaders/present.wgsl");
+        let module = naga::front::wgsl::parse_str(src).expect("parse present.wgsl");
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        );
+        validator
+            .validate(&module)
+            .expect("present.wgsl should validate");
     }
 }
 

@@ -431,7 +431,8 @@ impl MyceliumGpu {
         self.uniforms.adjust(self.param_slot, delta);
     }
 
-    pub fn set_param_normalized(&mut self, t: f32) {
+    pub fn set_param_normalized(&mut self, slot: u32, t: f32) {
+        self.param_slot = slot % 8;
         self.uniforms.set_normalized(self.param_slot, t);
     }
 
@@ -498,6 +499,16 @@ impl MyceliumGpu {
             selected_reserve: 0.0,
             param_slot: self.param_slot as f32,
             param_value: self.uniforms.param_value(self.param_slot),
+            param_fills: [
+                self.uniforms.param_normalized(0),
+                self.uniforms.param_normalized(1),
+                self.uniforms.param_normalized(2),
+                self.uniforms.param_normalized(3),
+                self.uniforms.param_normalized(4),
+                self.uniforms.param_normalized(5),
+                self.uniforms.param_normalized(6),
+                self.uniforms.param_normalized(7),
+            ],
             soluble_c: 0.0,
             soluble_n: 0.0,
             slice_thickness: self.slice.thickness,

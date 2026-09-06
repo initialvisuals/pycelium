@@ -48,6 +48,8 @@ struct PresentUniforms {
     tip_rect: vec4<f32>,
     callout: vec4<f32>,
     nudge_rect: vec4<f32>,
+    params_a: vec4<f32>,
+    params_b: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> u: PresentUniforms;
@@ -178,8 +180,7 @@ fn bar(uv: vec2<f32>, origin: vec2<f32>, fill: f32, rgb: vec3<f32>) -> vec3<f32>
 }
 
 // House chrome slider: thin white frame, 1–2 px shadow, filled track + handle.
-fn knob(uv: vec2<f32>, origin: vec2<f32>, fill: f32, tint: vec3<f32>) -> vec3<f32> {
-    let size = vec2<f32>(0.118, 0.014);
+fn knob_at(uv: vec2<f32>, origin: vec2<f32>, fill: f32, tint: vec3<f32>, size: vec2<f32>) -> vec3<f32> {
     let r0 = origin;
     let r1 = origin + size;
     if uv.x < r0.x || uv.x > r1.x || uv.y < r0.y || uv.y > r1.y {
@@ -201,25 +202,12 @@ fn knob(uv: vec2<f32>, origin: vec2<f32>, fill: f32, tint: vec3<f32>) -> vec3<f3
     return rgb;
 }
 
-// Must stay in lockstep with `SimUniforms::param_range`.
-fn param_fill(slot: f32, value: f32) -> f32 {
-    let s = i32(slot + 0.5);
-    if s == 0 || s == 1 || s == 2 {
-        return clamp(value / 3.0, 0.0, 1.0);
-    }
-    if s == 3 {
-        return clamp((value - 0.2) / 2.8, 0.0, 1.0);
-    }
-    if s == 4 {
-        return clamp(value / 0.02, 0.0, 1.0);
-    }
-    if s == 5 {
-        return clamp(value / 0.12, 0.0, 1.0);
-    }
-    if s == 6 {
-        return clamp((value - 0.1) / 1.9, 0.0, 1.0);
-    }
-    return clamp((value - 0.2) / 2.0, 0.0, 1.0);
+fn knob(uv: vec2<f32>, origin: vec2<f32>, fill: f32, tint: vec3<f32>) -> vec3<f32> {
+    return knob_at(uv, origin, fill, tint, vec2<f32>(0.118, 0.014));
+}
+
+fn knob_compact(uv: vec2<f32>, origin: vec2<f32>, fill: f32, tint: vec3<f32>) -> vec3<f32> {
+    return knob_at(uv, origin, fill, tint, vec2<f32>(0.118, 0.010));
 }
 
 fn px() -> vec2<f32> {
@@ -338,13 +326,37 @@ fn label_char(id: i32, slot: i32) -> i32 {
         case 31: { // HEIGHT
             switch slot { case 0: { return 8; } case 1: { return 5; } case 2: { return 9; } case 3: { return 7; } case 4: { return 8; } case 5: { return 20; } default: { return -1; } }
         }
+        case 32: { // CHEMO
+            switch slot { case 0: { return 3; } case 1: { return 8; } case 2: { return 5; } case 3: { return 13; } case 4: { return 15; } default: { return -1; } }
+        }
+        case 33: { // NITRO
+            switch slot { case 0: { return 14; } case 1: { return 9; } case 2: { return 20; } case 3: { return 18; } case 4: { return 15; } default: { return -1; } }
+        }
+        case 34: { // AUTO
+            switch slot { case 0: { return 1; } case 1: { return 21; } case 2: { return 20; } case 3: { return 15; } default: { return -1; } }
+        }
+        case 35: { // PERSIST
+            switch slot { case 0: { return 16; } case 1: { return 5; } case 2: { return 18; } case 3: { return 19; } case 4: { return 9; } case 5: { return 19; } case 6: { return 20; } default: { return -1; } }
+        }
+        case 36: { // MAINT
+            switch slot { case 0: { return 13; } case 1: { return 1; } case 2: { return 9; } case 3: { return 14; } case 4: { return 20; } default: { return -1; } }
+        }
+        case 37: { // ENZYME_K
+            switch slot { case 0: { return 5; } case 1: { return 14; } case 2: { return 26; } case 3: { return 25; } case 4: { return 13; } case 5: { return 5; } case 6: { return 41; } case 7: { return 11; } default: { return -1; } }
+        }
+        case 38: { // BRANCH
+            switch slot { case 0: { return 2; } case 1: { return 18; } case 2: { return 1; } case 3: { return 14; } case 4: { return 3; } case 5: { return 8; } default: { return -1; } }
+        }
+        case 39: { // EXTEND
+            switch slot { case 0: { return 5; } case 1: { return 24; } case 2: { return 20; } case 3: { return 5; } case 4: { return 14; } case 5: { return 4; } default: { return -1; } }
+        }
         default: { return -1; }
     }
 }
 
-fn draw_label(uv: vec2<f32>, origin: vec2<f32>, id: i32) -> f32 {
+fn draw_label_sz(uv: vec2<f32>, origin: vec2<f32>, id: i32, gw: f32, gh: f32) -> f32 {
     let n = 8.0;
-    let local = (uv - origin) / vec2<f32>(0.0112 * n, 0.022);
+    let local = (uv - origin) / vec2<f32>(gw * n, gh);
     if local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0 {
         return 0.0;
     }
@@ -353,6 +365,10 @@ fn draw_label(uv: vec2<f32>, origin: vec2<f32>, id: i32) -> f32 {
     let ch = label_char(id, slot);
     if ch < 0 { return 0.0; }
     return letter(cell, ch);
+}
+
+fn draw_label(uv: vec2<f32>, origin: vec2<f32>, id: i32) -> f32 {
+    return draw_label_sz(uv, origin, id, 0.0112, 0.022);
 }
 
 fn sd_seg(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
@@ -461,27 +477,48 @@ fn row_alpha(cursor: vec2<f32>, y0: f32, y1: f32, density: f32, fade: f32, picke
     return clamp(max(focus, hover), 0.0, 1.0) * fade;
 }
 
-fn paint_label(uv: vec2<f32>, origin: vec2<f32>, id: i32, alpha: f32, rgb: vec3<f32>) -> vec3<f32> {
+fn paint_label_sz(uv: vec2<f32>, origin: vec2<f32>, id: i32, alpha: f32, gw: f32, gh: f32, rgb: vec3<f32>) -> vec3<f32> {
     if alpha <= 0.004 {
         return rgb;
     }
-    let shadow = draw_label(uv, origin + px() * 1.5, id);
-    let ink = draw_label(uv, origin, id);
+    let shadow = draw_label_sz(uv, origin + px() * 1.5, id, gw, gh);
+    let ink = draw_label_sz(uv, origin, id, gw, gh);
     var out = rgb;
     out = mix(out, vec3<f32>(0.0, 0.0, 0.0), shadow * alpha * 0.45);
     out = mix(out, vec3<f32>(1.0, 1.0, 1.0), ink * alpha);
     return out;
 }
 
-fn swatch(uv: vec2<f32>, origin: vec2<f32>, fill: f32, tint: vec3<f32>) -> vec3<f32> {
-    let local = (uv - origin) / vec2<f32>(0.015, 0.018);
+fn paint_label(uv: vec2<f32>, origin: vec2<f32>, id: i32, alpha: f32, rgb: vec3<f32>) -> vec3<f32> {
+    return paint_label_sz(uv, origin, id, alpha, 0.0112, 0.022, rgb);
+}
+
+fn swatch_sz(uv: vec2<f32>, origin: vec2<f32>, fill: f32, tint: vec3<f32>, size: vec2<f32>) -> vec3<f32> {
+    let local = (uv - origin) / size;
     if local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0 {
         return vec3<f32>(0.0);
     }
     let p = px();
-    let edge = local.x < p.x / 0.015 || local.x > 1.0 - p.x / 0.015 || local.y < p.y / 0.018 || local.y > 1.0 - p.y / 0.018;
+    let edge = local.x < p.x / size.x || local.x > 1.0 - p.x / size.x || local.y < p.y / size.y || local.y > 1.0 - p.y / size.y;
     let body = mix(tint * 0.18, tint, clamp(fill, 0.22, 1.0));
     return select(body, vec3<f32>(0.92, 0.93, 0.90), edge);
+}
+
+fn swatch(uv: vec2<f32>, origin: vec2<f32>, fill: f32, tint: vec3<f32>) -> vec3<f32> {
+    return swatch_sz(uv, origin, fill, tint, vec2<f32>(0.015, 0.018));
+}
+
+fn param_fill_at(slot: i32) -> f32 {
+    switch slot {
+        case 0: { return u.params_a.x; }
+        case 1: { return u.params_a.y; }
+        case 2: { return u.params_a.z; }
+        case 3: { return u.params_a.w; }
+        case 4: { return u.params_b.x; }
+        case 5: { return u.params_b.y; }
+        case 6: { return u.params_b.z; }
+        default: { return u.params_b.w; }
+    }
 }
 
 @fragment
@@ -772,12 +809,10 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         ink = ink + draw_number(uv, vec2<f32>(0.168, 0.558), u.slice_z, 4);
         ink = ink + draw_number(uv, vec2<f32>(0.168, 0.600), u.slice_thickness, 3);
         ink = ink + draw_number(uv, vec2<f32>(0.168, 0.642), u.slice_zoom * 100.0, 3);
-        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.700), f32(sid), 6);
-        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.742), lineage, 3);
-        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.784), age, 5);
-        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.826), reserve * 100.0, 4);
-        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.896), u.param_slot + 1.0, 1);
-        ink = ink + draw_number(uv, vec2<f32>(0.188, 0.896), u.param_value * 100.0, 4);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.694), f32(sid), 6);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.720), lineage, 3);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.746), age, 5);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.772), reserve * 100.0, 4);
         rgb = rgb + vec3<f32>(0.70, 0.76, 0.72) * ink * 0.85;
         rgb = rgb + bar(uv, vec2<f32>(0.128, 0.312), hypha_f, teal);
         rgb = rgb + bar(uv, vec2<f32>(0.128, 0.354), cord_f, amber);
@@ -788,15 +823,34 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         let zfill = clamp((u.slice_z - 1.0) / max(f32(u.depth) - 3.0, 1.0), 0.0, 1.0);
         let tfill = clamp((u.slice_thickness - 1.0) / max(f32(u.depth) - 1.0, 1.0), 0.0, 1.0);
         let zof = clamp((u.slice_zoom - 0.12) / 0.88, 0.0, 1.0);
-        let pfill = param_fill(u.param_slot, u.param_value);
         let k0 = knob(uv, vec2<f32>(0.128, 0.576), zfill, warm);
         let k1 = knob(uv, vec2<f32>(0.128, 0.618), tfill, warm);
         let k2 = knob(uv, vec2<f32>(0.128, 0.662), zof, warm);
-        let k3 = knob(uv, vec2<f32>(0.128, 0.918), pfill, ice);
         if k0.x + k0.y + k0.z > 0.0 { rgb = k0; }
         if k1.x + k1.y + k1.z > 0.0 { rgb = k1; }
         if k2.x + k2.y + k2.z > 0.0 { rgb = k2; }
-        if k3.x + k3.y + k3.z > 0.0 { rgb = k3; }
+
+        let psel = i32(u.param_slot + 0.5);
+        let ptint = array<vec3<f32>, 8>(
+            rust, violet, teal, gold, amber, green, ice, warm
+        );
+        for (var pi = 0; pi < 8; pi++) {
+            let y0 = 0.800 + f32(pi) * 0.023;
+            let sel = pi == psel;
+            let tint = ptint[pi];
+            let fill = param_fill_at(pi);
+            let kn = knob_compact(uv, vec2<f32>(0.128, y0 + 0.006), fill, tint);
+            if kn.x + kn.y + kn.z > 0.0 {
+                rgb = kn;
+            }
+            rgb = rgb + swatch_sz(
+                uv,
+                vec2<f32>(0.012, y0 + 0.004),
+                select(0.45, 0.95, sel),
+                tint,
+                vec2<f32>(0.015, 0.014)
+            );
+        }
 
         rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.058), 0.85, ice);
         rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.100), clamp(live / 400000.0, 0.2, 1.0), teal);
@@ -812,11 +866,10 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.558), 0.7, warm);
         rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.600), 0.55, warm);
         rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.642), 0.4, warm);
-        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.700), select(0.25, 0.9, sid < 20000000u), teal);
-        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.742), select(0.25, 0.75, sid < 20000000u), gold);
-        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.784), select(0.25, 0.6, sid < 20000000u), ice);
-        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.826), select(0.25, clamp(reserve, 0.25, 1.0), sid < 20000000u), amber);
-        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.896), 0.7, ice);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.694), select(0.25, 0.9, sid < 20000000u), teal);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.720), select(0.25, 0.75, sid < 20000000u), gold);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.746), select(0.25, 0.6, sid < 20000000u), ice);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.772), select(0.25, clamp(reserve, 0.25, 1.0), sid < 20000000u), amber);
 
         let cursor = u.hud_ui.xy;
         let density = u.hud_ui.z;
@@ -826,8 +879,8 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.048), vec2<f32>(0.250, 0.258)) * chrome);
         rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.300), vec2<f32>(0.250, 0.548)) * chrome);
         rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.548), vec2<f32>(0.250, 0.682)) * chrome);
-        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.688), vec2<f32>(0.250, 0.862)) * chrome);
-        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.878), vec2<f32>(0.250, 0.938)) * chrome);
+        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.688), vec2<f32>(0.250, 0.792)) * chrome);
+        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.800), vec2<f32>(0.250, 0.984)) * chrome);
 
         let a0 = row_alpha(cursor, 0.050, 0.095, density, fade, false);
         let a1 = row_alpha(cursor, 0.095, 0.137, density, fade, false);
@@ -843,11 +896,10 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         let a11 = row_alpha(cursor, 0.548, 0.592, density, fade, false);
         let a12 = row_alpha(cursor, 0.592, 0.634, density, fade, false);
         let a13 = row_alpha(cursor, 0.634, 0.682, density, fade, false);
-        let a14 = row_alpha(cursor, 0.688, 0.734, density, fade, picked);
-        let a15 = row_alpha(cursor, 0.734, 0.776, density, fade, picked);
-        let a16 = row_alpha(cursor, 0.776, 0.818, density, fade, picked);
-        let a17 = row_alpha(cursor, 0.818, 0.862, density, fade, picked);
-        let a18 = row_alpha(cursor, 0.878, 0.940, density, fade, false);
+        let a14 = row_alpha(cursor, 0.688, 0.714, density, fade, picked);
+        let a15 = row_alpha(cursor, 0.714, 0.740, density, fade, picked);
+        let a16 = row_alpha(cursor, 0.740, 0.766, density, fade, picked);
+        let a17 = row_alpha(cursor, 0.766, 0.792, density, fade, picked);
 
         rgb = paint_label(uv, vec2<f32>(0.032, 0.054), 0, a0, rgb);
         rgb = paint_label(uv, vec2<f32>(0.032, 0.096), 1, a1, rgb);
@@ -863,11 +915,17 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         rgb = paint_label(uv, vec2<f32>(0.032, 0.554), 11, a11, rgb);
         rgb = paint_label(uv, vec2<f32>(0.032, 0.596), 12, a12, rgb);
         rgb = paint_label(uv, vec2<f32>(0.032, 0.638), 13, a13, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.032, 0.696), 14, a14, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.032, 0.738), 15, a15, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.032, 0.780), 16, a16, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.032, 0.822), 17, a17, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.032, 0.892), 18, a18, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.690), 14, a14, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.716), 15, a15, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.742), 16, a16, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.768), 17, a17, rgb);
+        for (var pi = 0; pi < 8; pi++) {
+            let y0 = 0.800 + f32(pi) * 0.023;
+            let y1 = y0 + 0.023;
+            let sel = pi == psel;
+            let pa = row_alpha(cursor, y0, y1, density, fade, sel);
+            rgb = paint_label_sz(uv, vec2<f32>(0.032, y0 + 0.003), 32 + pi, pa, 0.0096, 0.016, rgb);
+        }
     }
 
     let help_fade = clamp(u.overlay_ui.x, 0.0, 1.0);

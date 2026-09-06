@@ -358,10 +358,13 @@ impl ApplicationHandler<AppAction> for App {
                                 HudSlider::SliceZ => fmt_slice_z(rt.sim.slice.z),
                                 HudSlider::Thick => fmt_thick(rt.sim.slice.thickness),
                                 HudSlider::Zoom => fmt_zoom(rt.sim.slice.zoom),
-                                HudSlider::Param => fmt_param(
-                                    rt.sim.param_slot,
-                                    rt.sim.uniforms.param_value(rt.sim.param_slot),
-                                ),
+                                HudSlider::Param(slot) => {
+                                    rt.sim.param_slot = slot as u32;
+                                    fmt_param(
+                                        rt.sim.param_slot,
+                                        rt.sim.uniforms.param_value(rt.sim.param_slot),
+                                    )
+                                }
                             };
                             if rt.cursor.0 >= teach::SLIDER_TRACK_X0 {
                                 apply_hud_slider(rt, slider, rt.cursor.0, &start);
@@ -388,7 +391,7 @@ impl ApplicationHandler<AppAction> for App {
                                         start.clone(),
                                         start.clone(),
                                     ),
-                                    HudSlider::Param => fire_nudge(
+                                    HudSlider::Param(_) => fire_nudge(
                                         rt,
                                         NudgeKind::Param,
                                         param_title(rt.sim.param_slot),
@@ -955,12 +958,17 @@ fn current_nudge(rt: &Runtime) -> Option<NudgeToast> {
     } else {
         format!("{} TO {}", n.old, n.new)
     };
+    let row_y = match n.kind {
+        NudgeKind::Param => teach::param_row_mid(rt.sim.param_slot),
+        other => other.row_y(),
+    };
     Some(NudgeToast {
         kind: n.kind,
         title: n.title.to_ascii_uppercase(),
         value,
         keys: n.kind.keys().to_string(),
         fade,
+        row_y,
     })
 }
 
@@ -999,8 +1007,8 @@ fn apply_hud_slider(rt: &mut Runtime, slider: HudSlider, x: f32, start: &str) {
                 fmt_zoom(rt.sim.slice.zoom),
             );
         }
-        HudSlider::Param => {
-            rt.sim.set_param_normalized(t);
+        HudSlider::Param(slot) => {
+            rt.sim.set_param_normalized(slot as u32, t);
             fire_nudge(
                 rt,
                 NudgeKind::Param,

@@ -10,7 +10,7 @@ The previous 5×5 captions were sampled with a Y flip against top-left bit packi
 
 - White sans-serif captions (system-UI / grotesque style)
 - Color box at the left of every row (always drawn, including `off`)
-- Thin 1-pixel frames around census / fields / slice / tip / param groups
+- Thin 1-pixel frames around census / fields / slice / tip / param groups (the param group is one shared frame around all eight knobs)
 - Tight 1–2 pixel drop shadow on type (no blur)
 - Density dial: rich (default, full opacity), sparse (hover/pick only), off (boxes + bars + small digits)
 - **H** toggles a compact **control-scheme** panel (bottom-right; slides left of the export card when that card is open)
@@ -57,26 +57,35 @@ Click in the volume to pick the nearest live tip. `hud[10]` is the pick distance
 
 | Row | Box | English | Small digits | Meaning |
 |-----|-----|---------|--------------|---------|
-| 0.70 | teal | `TIP` | 6 | selected tip slot |
-| 0.74 | gold | `LINEAGE` | 3 | inoculum / colony id |
-| 0.78 | ice | `AGE` | 5 | tip age |
-| 0.82 | amber | `RESERVE` | 4 | internal reserve × 100 |
+| 0.69 | teal | `TIP` | 6 | selected tip slot |
+| 0.72 | gold | `LINEAGE` | 3 | inoculum / colony id |
+| 0.75 | ice | `AGE` | 5 | tip age |
+| 0.77 | amber | `RESERVE` | 4 | internal reserve × 100 |
 
 After a pick, sparse mode keeps this block readable.
 
-## Param knob
+## Param knobs (compact group, shared frame)
 
-| Row | Box | English | Small digits | Meaning |
-|-----|-----|---------|--------------|---------|
-| 0.90 | ice | `PARAM` | 1 + 4 | slot `1–8` and value × 100 + slider |
+Eight dedicated sliders replace the old single PARAM row. Tracks are shorter than the slice knobs so the group fits under the compressed tip block without a scroll. Census / fields / slice UV rows are unchanged.
 
-Slots: chemotropism, nitrotropism, autotropism, persistence, maintenance, enzyme_k, branch_cost, extension. Keys `1–8` select, `-` / `=` nudge, or drag the framed track. While adjusting, a toast shows **slot / name / old→new** and `1–8 select  -/= nudge`, then fades after a short idle.
+| Row (UV y0) | Box | English | Slot / sim name |
+|-------------|-----|---------|-----------------|
+| 0.800 | rust | `CHEMO` | 1 chemotropism |
+| 0.823 | violet | `NITRO` | 2 nitrotropism |
+| 0.846 | teal | `AUTO` | 3 autotropism |
+| 0.869 | gold | `PERSIST` | 4 persistence |
+| 0.892 | amber | `MAINT` | 5 maintenance |
+| 0.915 | green | `ENZYME_K` | 6 enzyme_k |
+| 0.938 | ice | `BRANCH` | 7 branch_cost |
+| 0.961 | warm | `EXTEND` | 8 extension |
+
+Keys `1–8` select / focus that row (sparse keeps the selected caption lit). `-` / `=` nudge the selected slot. Drag any framed track to set that slot and select it. While adjusting, a toast shows **slot / name / old→new** and `1–8 select  -/= nudge`, then fades after a short idle. Hover a row for high-vs-low teach copy.
 
 Slice **export** (face-aligned 2D squash / rich box) is a separate capture mode (`E`). It does not change these HUD rows. The export settings card (`S`) lives on the **right**, under the slab inset. See [SLICE_EXPORT.md](SLICE_EXPORT.md).
 
 ## Control scheme + hover teach
 
-**H** opens or hides the corner keybind panel (global, including during capture). Hover any left-HUD meter — FPS through PARAM — or a row on that panel for a verbose plain-English callout (sim meaning, plus terms such as anastomosis, chemotropism, soluble C/N, exoenzyme, cord). The popup sits near the mouse and is tied to the control with a thin white elbow / string (1–2 px shadow, no blur).
+**H** opens or hides the corner keybind panel (global, including during capture). Hover any left-HUD meter — FPS through the eight PARAM sliders — or a row on that panel for a verbose plain-English callout (sim meaning, plus terms such as anastomosis, chemotropism, soluble C/N, exoenzyme, cord). Each param popup says what a high value does versus a low one. The popup sits near the mouse and is tied to the control with a thin white elbow / string (1–2 px shadow, no blur).
 
 Tab `off` still teaches if the cursor is on a color box, bar, or slider. Sliders stay drawn in every density mode (same as bars). If a future chrome piece has no hit box, teach cannot fire for it.
 

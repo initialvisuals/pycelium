@@ -25,9 +25,17 @@ pub const OVERLAY_WORDS: usize = 1024;
 
 pub const HUD_X0: f32 = 0.008;
 pub const HUD_X1: f32 = 0.250;
-/// Thin framed tracks on SLICE Z / THICK / ZOOM / PARAM. Match `present.wgsl`.
+/// Thin framed tracks on SLICE Z / THICK / ZOOM / the eight PARAM rows. Match `present.wgsl`.
 pub const SLIDER_TRACK_X0: f32 = 0.128;
 pub const SLIDER_TRACK_X1: f32 = 0.246;
+/// Compressed tip block so eight compact param sliders fit without a scroll.
+pub const TIP_BLOCK_Y0: f32 = 0.688;
+pub const TIP_BLOCK_Y1: f32 = 0.792;
+pub const TIP_ROW_H: f32 = 0.026;
+/// Shared param group. Eight rows; smaller tracks than the slice knobs.
+pub const PARAM_BLOCK_Y0: f32 = 0.800;
+pub const PARAM_BLOCK_Y1: f32 = 0.984;
+pub const PARAM_ROW_H: f32 = 0.023;
 const INSET: [f32; 4] = [0.72, 0.06, 0.98, 0.34];
 
 /// Bottom-right, under the slab inset. When the export card is fully open
@@ -62,6 +70,14 @@ pub enum HoverId {
     Age,
     Reserve,
     Param,
+    ParamChemo,
+    ParamNitro,
+    ParamAuto,
+    ParamPersist,
+    ParamMaint,
+    ParamEnzyme,
+    ParamBranch,
+    ParamExtend,
     Help,
     Orbit,
     Dolly,
@@ -122,7 +138,30 @@ pub enum HudSlider {
     SliceZ,
     Thick,
     Zoom,
-    Param,
+    Param(u8),
+}
+
+pub fn param_row(slot: u32) -> (f32, f32) {
+    let y0 = PARAM_BLOCK_Y0 + (slot % 8) as f32 * PARAM_ROW_H;
+    (y0, y0 + PARAM_ROW_H)
+}
+
+pub fn param_row_mid(slot: u32) -> f32 {
+    let (y0, y1) = param_row(slot);
+    0.5 * (y0 + y1)
+}
+
+pub fn param_hover(slot: u32) -> HoverId {
+    match slot % 8 {
+        0 => HoverId::ParamChemo,
+        1 => HoverId::ParamNitro,
+        2 => HoverId::ParamAuto,
+        3 => HoverId::ParamPersist,
+        4 => HoverId::ParamMaint,
+        5 => HoverId::ParamEnzyme,
+        6 => HoverId::ParamBranch,
+        _ => HoverId::ParamExtend,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,9 +184,9 @@ impl NudgeKind {
         }
     }
 
-    fn row_y(self) -> f32 {
+    pub fn row_y(self) -> f32 {
         match self {
-            Self::Param => 0.908,
+            Self::Param => param_row_mid(0),
             Self::SliceZ => 0.570,
             Self::Thick => 0.612,
             Self::Zoom | Self::Pan => 0.656,
@@ -157,11 +196,14 @@ impl NudgeKind {
 
 #[derive(Clone, Debug)]
 pub struct NudgeToast {
+    /// Which meter this toast belongs to (also drives `keys` / `row_y` at the call site).
+    #[allow(dead_code)]
     pub kind: NudgeKind,
     pub title: String,
     pub value: String,
     pub keys: String,
     pub fade: f32,
+    pub row_y: f32,
 }
 
 pub fn slider_t(x: f32) -> f32 {
@@ -178,8 +220,13 @@ pub fn hud_slider_at(uv: (f32, f32)) -> Option<HudSlider> {
         Some(HudSlider::Thick)
     } else if uv.1 >= 0.634 && uv.1 < 0.682 {
         Some(HudSlider::Zoom)
-    } else if uv.1 >= 0.878 && uv.1 < 0.940 {
-        Some(HudSlider::Param)
+    } else if uv.1 >= PARAM_BLOCK_Y0 && uv.1 < PARAM_BLOCK_Y1 {
+        let i = ((uv.1 - PARAM_BLOCK_Y0) / PARAM_ROW_H).floor() as i32;
+        if (0..8).contains(&i) {
+            Some(HudSlider::Param(i as u8))
+        } else {
+            None
+        }
     } else {
         None
     }
@@ -206,11 +253,18 @@ const HUD_ROWS: &[HudRow] = &[
     HudRow { id: HoverId::SliceZ, y0: 0.548, y1: 0.592 },
     HudRow { id: HoverId::Thick, y0: 0.592, y1: 0.634 },
     HudRow { id: HoverId::Zoom, y0: 0.634, y1: 0.682 },
-    HudRow { id: HoverId::Tip, y0: 0.688, y1: 0.734 },
-    HudRow { id: HoverId::Lineage, y0: 0.734, y1: 0.776 },
-    HudRow { id: HoverId::Age, y0: 0.776, y1: 0.818 },
-    HudRow { id: HoverId::Reserve, y0: 0.818, y1: 0.862 },
-    HudRow { id: HoverId::Param, y0: 0.878, y1: 0.940 },
+    HudRow { id: HoverId::Tip, y0: 0.688, y1: 0.714 },
+    HudRow { id: HoverId::Lineage, y0: 0.714, y1: 0.740 },
+    HudRow { id: HoverId::Age, y0: 0.740, y1: 0.766 },
+    HudRow { id: HoverId::Reserve, y0: 0.766, y1: 0.792 },
+    HudRow { id: HoverId::ParamChemo, y0: 0.800, y1: 0.823 },
+    HudRow { id: HoverId::ParamNitro, y0: 0.823, y1: 0.846 },
+    HudRow { id: HoverId::ParamAuto, y0: 0.846, y1: 0.869 },
+    HudRow { id: HoverId::ParamPersist, y0: 0.869, y1: 0.892 },
+    HudRow { id: HoverId::ParamMaint, y0: 0.892, y1: 0.915 },
+    HudRow { id: HoverId::ParamEnzyme, y0: 0.915, y1: 0.938 },
+    HudRow { id: HoverId::ParamBranch, y0: 0.938, y1: 0.961 },
+    HudRow { id: HoverId::ParamExtend, y0: 0.961, y1: 0.984 },
 ];
 
 struct SchemeRow {
@@ -376,7 +430,7 @@ pub fn pack_overlay(
     if let Some(toast) = nudge {
         if toast.fade > 0.004 {
             pack_nudge(&mut out.chars, toast);
-            nudge_rect = place_nudge(toast.kind, help, scheme_on);
+            nudge_rect = place_nudge(toast, help, scheme_on);
             nudge_fade = toast.fade;
         }
     }
@@ -402,11 +456,11 @@ fn pack_nudge(chars: &mut [u32], toast: &NudgeToast) {
     blit_line(chars, NUDGE_BASE, NUDGE_COLS, 2, &toast.keys);
 }
 
-fn place_nudge(kind: NudgeKind, help: [f32; 4], scheme_on: bool) -> [f32; 4] {
+fn place_nudge(toast: &NudgeToast, help: [f32; 4], scheme_on: bool) -> [f32; 4] {
     let w = 0.268;
     let h = 0.074;
     let mut x = 0.258;
-    let mut y = (kind.row_y() - 0.012).clamp(0.012, 0.984 - h);
+    let mut y = (toast.row_y - 0.012).clamp(0.012, 0.984 - h);
     let mut rect = [x, y, x + w, y + h];
     if scheme_on && rects_overlap(rect, help) {
         x = (help[2] + 0.012).min(0.990 - w);
@@ -563,7 +617,31 @@ fn tip_text(id: HoverId) -> &'static str {
             "Internal carbon the picked tip is carrying (shown times 100). Extension and branching spend this. A starved tip stops growing even if soil food is nearby, until uptake refills it."
         }
         HoverId::Param | HoverId::ParamKeys => {
-            "Live knob 1-8: chemotropism, nitrotropism, autotropism, persistence, maintenance, enzyme_k, branch cost, extension. Keys 1-8 select the slot. Minus and equals nudge, or drag the framed slider. A toast shows the name, value, and keys while you tweak."
+            "Eight left-HUD sliders: chemotropism, nitrotropism, autotropism, persistence, maintenance, enzyme_k, branch cost, extension. Keys 1-8 select. Minus and equals nudge the focused slot. Drag any track to set it and select it."
+        }
+        HoverId::ParamChemo => {
+            "Chemotropism steers each tip toward soluble carbon, the rust SOL C field. High: tips hunt food plumes and bend hard toward litter. Low: they ignore C gradients and wander or follow persistence, nitrogen, or autotropism instead. Key 1. Drag the track or use minus and equals."
+        }
+        HoverId::ParamNitro => {
+            "Nitrotropism pulls tips toward soluble nitrogen (SOL N). High: tips, especially when reserve is low, chase N plumes, useful in an N-poor pedon. Low: nitrogen barely steers, so a tip may linger in C-rich, N-poor soil. The pull eases as the pantry fills. Key 2."
+        }
+        HoverId::ParamAuto => {
+            "Autotropism turns a tip away from its own trail and nearby biomass (autocrine plus hypha). High: tips avoid crowding, fan into empty soil, and recross old mycelium less. Low: they may pile onto existing hyphae. This is keep-off-the-old-network, not food seeking. Key 3."
+        }
+        HoverId::ParamPersist => {
+            "Persistence keeps the current heading versus turning to tropisms. High: long straight runs; the tip commits and only slowly bends. Low: twitchy steering, yanked by every nearby C, N, or self gradient. High persist plus high chemo still hunts, but in smoother arcs. Key 4."
+        }
+        HoverId::ParamMaint => {
+            "Maintenance is the carbon living biomass burns just to stay alive. High: the network is expensive; cords and hyphae drain internal C and can thin if unfed. Low: cheap upkeep, so a colony banks reserve and survives lean soil. A tax on walls, not tip steps. Key 5."
+        }
+        HoverId::ParamEnzyme => {
+            "Enzyme_k scales how fast leaked exoenzyme cuts ORGANIC polymer into soluble C and N. High: litter unlocks quickly; SOL C and SOL N rise while the brown ORGANIC bar falls. Low: enzyme sits on uncleaved polymer and the meal stays wrapped. This is outside digestion. Key 6."
+        }
+        HoverId::ParamBranch => {
+            "Branch cost is how much reserve a tip must hold before it can birth a side tip. High: forks are expensive; fewer branches, longer unbranched runs. Low: cheap forks, denser trees, more tips hunting litter, and more carbon spent on new heads. Watch the BRANCHES census. Key 7."
+        }
+        HoverId::ParamExtend => {
+            "Extension (max_extension) is how far a tip steps each tick when it has reserve. High: fast explorers that cover voxels quickly, but they can overshoot food and spend reserve faster. Low: short cautious steps; the colony creeps. Starved tips still take shorter steps. Key 8."
         }
         HoverId::Help => {
             "H toggles this corner control-scheme panel, always, including in capture. It never writes a heightmap. Hover a row here, or a left HUD meter, for a teach callout on a white string."
@@ -593,7 +671,7 @@ fn tip_text(id: HoverId) -> &'static str {
             "Hold Shift to coarsen slice depth, thickness, zoom, and pan. In capture, Shift+wheel also grows cutter thickness. It is a modifier, not a mode."
         }
         HoverId::Nudge => {
-            "Minus and equals (or underscore / plus) nudge the selected PARAM slot. Use 1-8 first to choose which rule you are tuning."
+            "Minus and equals (or underscore / plus) nudge the selected PARAM slot. Use 1-8 first, or drag any of the eight left-HUD sliders to select that rule and set its value."
         }
         HoverId::Tab => {
             "Tab cycles label density: rich (full English names), sparse (names on hover or pick), then off (boxes, bars, and small digits only). Hover teach still works in off because the boxes stay hit-testable."
@@ -669,8 +747,10 @@ mod tests {
         let (id, anchor) = hit_test((0.04, 0.110), false, false, false);
         assert_eq!(id, HoverId::Tips);
         assert!((anchor[0] - HUD_X1).abs() < 1e-5);
-        let (id, _) = hit_test((0.04, 0.910), false, false, false);
-        assert_eq!(id, HoverId::Param);
+        let (id, _) = hit_test((0.04, 0.811), false, false, false);
+        assert_eq!(id, HoverId::ParamChemo);
+        let (id, _) = hit_test((0.04, 0.972), false, false, false);
+        assert_eq!(id, HoverId::ParamExtend);
         let (id, _) = hit_test((0.40, 0.110), false, false, false);
         assert_eq!(id, HoverId::None);
     }
@@ -705,6 +785,16 @@ mod tests {
         assert!(wrap_text(tip_text(HoverId::Param), TIP_COLS).len() <= TIP_ROWS);
         assert!(wrap_text(tip_text(HoverId::ExportFormat), TIP_COLS).len() <= TIP_ROWS);
         assert!(wrap_text(tip_text(HoverId::ExportHeightmap), TIP_COLS).len() <= TIP_ROWS);
+        for slot in 0..8u32 {
+            let id = param_hover(slot);
+            let n = wrap_text(tip_text(id), TIP_COLS).len();
+            assert!(n <= TIP_ROWS, "param {slot} teach wraps to {n} lines");
+            let text = tip_text(id);
+            assert!(
+                text.contains("High:") && text.contains("Low:"),
+                "param {slot} must explain high vs low"
+            );
+        }
     }
 
     #[test]
@@ -734,6 +824,7 @@ mod tests {
             value: "1.06 TO 1.10".into(),
             keys: NudgeKind::Param.keys().into(),
             fade: 1.0,
+            row_y: param_row_mid(0),
         };
         let gpu = pack_overlay(
             false,
@@ -757,11 +848,27 @@ mod tests {
         assert_eq!(hud_slider_at((0.16, 0.570)), Some(HudSlider::SliceZ));
         assert_eq!(hud_slider_at((0.16, 0.610)), Some(HudSlider::Thick));
         assert_eq!(hud_slider_at((0.16, 0.650)), Some(HudSlider::Zoom));
-        assert_eq!(hud_slider_at((0.16, 0.910)), Some(HudSlider::Param));
+        assert_eq!(hud_slider_at((0.16, 0.811)), Some(HudSlider::Param(0)));
+        assert_eq!(hud_slider_at((0.16, 0.972)), Some(HudSlider::Param(7)));
         assert!(hud_slider_at((0.16, 0.110)).is_none());
-        assert!(hud_slider_at((0.40, 0.910)).is_none());
+        assert!(hud_slider_at((0.40, 0.811)).is_none());
         assert!((slider_t(SLIDER_TRACK_X0) - 0.0).abs() < 1e-5);
         assert!((slider_t(SLIDER_TRACK_X1) - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn eight_param_rows_pack_under_tip_block() {
+        assert!((TIP_BLOCK_Y1 - TIP_BLOCK_Y0 - 4.0 * TIP_ROW_H).abs() < 1e-5);
+        assert!((PARAM_BLOCK_Y1 - PARAM_BLOCK_Y0 - 8.0 * PARAM_ROW_H).abs() < 1e-5);
+        assert!(TIP_BLOCK_Y1 <= PARAM_BLOCK_Y0 + 1e-5);
+        assert!(PARAM_BLOCK_Y1 <= 0.990);
+        for slot in 0..8u32 {
+            let (y0, y1) = param_row(slot);
+            let mid = 0.5 * (y0 + y1);
+            assert_eq!(hud_slider_at((0.16, mid)), Some(HudSlider::Param(slot as u8)));
+            let (id, _) = hit_test((0.04, mid), false, false, false);
+            assert_eq!(id, param_hover(slot));
+        }
     }
 
     #[test]

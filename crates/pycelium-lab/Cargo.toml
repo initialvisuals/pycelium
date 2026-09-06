@@ -9,4 +9,3 @@ authors.workspace = true
 
 [dependencies]
 pycelium-core.workspace = true
-clap.workspace = true

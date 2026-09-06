@@ -1,76 +1,28 @@
+mod args;
 mod render;
 
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
 use pycelium_core::{SimConfig, World};
 
+use crate::args::{parse_args, Command};
 use crate::render::{render_ascii, write_occupancy_pgm};
 
-/// Pycelium PC sim-lab harness: run measurable growth experiments.
-#[derive(Parser, Debug)]
-#[command(name = "pycelium-lab", version, about)]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Subcommand, Debug)]
-enum Command {
-    /// Run N steps and print data-science metrics.
-    Bench(RunArgs),
-    /// Run N steps and print a downsampled ASCII slice of the grid.
-    View(RunArgs),
-}
-
-#[derive(clap::Args, Debug)]
-struct RunArgs {
-    /// Grid width in cells. Increase this (with --height) to soak RAM.
-    #[arg(long, default_value_t = 512)]
-    width: u32,
-    /// Grid height in cells.
-    #[arg(long, default_value_t = 512)]
-    height: u32,
-    /// Simulation steps to run.
-    #[arg(long, default_value_t = 200)]
-    steps: u32,
-    /// RNG seed for a repeatable run.
-    #[arg(long, default_value_t = 1)]
-    seed: u64,
-    /// Inoculum / active tip count at t=0.
-    #[arg(long, default_value_t = 4)]
-    tips: u32,
-    /// Scattered nutrient patches.
-    #[arg(long, default_value_t = 48)]
-    food: u32,
-    /// Nutrient patch radius in cells.
-    #[arg(long, default_value_t = 12)]
-    radius: u32,
-    /// Print a JSON object instead of the text report.
-    #[arg(long)]
-    json: bool,
-    /// Also print an ASCII slice after the run (bench only; view always does).
-    #[arg(long)]
-    ascii: bool,
-    /// ASCII slice width in characters.
-    #[arg(long, default_value_t = 80)]
-    view_width: u32,
-    /// ASCII slice height in rows.
-    #[arg(long, default_value_t = 24)]
-    view_height: u32,
-    /// Write occupancy as a binary PGM (viewable in any image tool).
-    #[arg(long)]
-    export_pgm: Option<PathBuf>,
-}
-
 fn main() -> ExitCode {
-    let cli = Cli::parse();
-    let (args, force_ascii) = match cli.command {
-        Command::Bench(args) => (args, false),
-        Command::View(args) => (args, true),
+    let (args, force_ascii) = match parse_args(std::env::args().skip(1)) {
+        Ok(Command::Help(text)) => {
+            print!("{text}");
+            return ExitCode::SUCCESS;
+        }
+        Ok(Command::Bench(args)) => (args, false),
+        Ok(Command::View(args)) => (args, true),
+        Err(err) => {
+            eprintln!("error: {err}");
+            eprintln!("try: pycelium-lab help");
+            return ExitCode::FAILURE;
+        }
     };
 
     if let Err(err) = run(args, force_ascii) {
@@ -80,7 +32,7 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn run(args: RunArgs, force_ascii: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn run(args: args::RunArgs, force_ascii: bool) -> Result<(), Box<dyn std::error::Error>> {
     let config = SimConfig {
         width: args.width,
         height: args.height,

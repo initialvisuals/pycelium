@@ -21,6 +21,6 @@ python -c "import ast; ast.parse(open('legacy/pycelium.py').read())"
 
 ## Credits
 
-Credits and AI credits will follow the [Concrete Echo](https://github.com/initialvisuals/_CONCRETE_ECHO_) pattern later: **name + role + shipped work**.
+Credits and AI credits will follow the Concrete Echo pattern later: **name + role + shipped work**.
 
 Do not invent credits. Only record people or agents that actually landed work, and describe what shipped.

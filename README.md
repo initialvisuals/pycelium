@@ -34,8 +34,8 @@ cargo test
 # measurable run (default 512², 200 steps)
 cargo run -p pycelium-lab --release -- bench
 
-# ASCII slice of the same run
-cargo run -p pycelium-lab --release -- view --width 160 --height 48 --steps 120 --seed 3
+# ASCII slice (hypha #, tip @, nutrient .)
+cargo run -p pycelium-lab --release -- view --width 256 --height 128 --steps 80 --seed 11
 
 # soak RAM: two bytes/cell (occupancy + nutrient). 8192² ≈ 128 MiB; 32768² ≈ 2 GiB
 cargo run -p pycelium-lab --release -- bench --width 4096 --height 4096 --steps 50 --seed 1

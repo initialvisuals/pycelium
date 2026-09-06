@@ -233,7 +233,10 @@ impl World {
         tip.x = nx;
         tip.y = ny;
         tip.heading = heading;
-        tip.energy = tip.energy.saturating_add(1).saturating_add(gained as u16 / 8);
+        tip.energy = tip
+            .energy
+            .saturating_add(1)
+            .saturating_add(gained as u16 / 8);
 
         let branch = if tip.energy >= self.config.branch_energy {
             tip.energy = 0;

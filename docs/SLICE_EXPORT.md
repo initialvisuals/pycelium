@@ -36,15 +36,17 @@ Hover a **face mid-edge** to rotate **90° on the free axis** (top-face left/rig
 
 ## Export settings (square POT)
 
-Default bake is a **power-of-two square**, not the ultra-wide native slab. The in-engine settings card sits on the right under the slab inset while capturing. Click the **EXPORT** chip (or press `S`) to open it.
+Default bake is a **power-of-two square**, not the ultra-wide native slab. The in-engine settings card sits on the right under the slab inset while capturing, above the thickness slider. Click the **EXPORT** chip (or press `S`) to open it. Size presets are a **two-column** grid so the full card stays on-screen and every control is inside the hit rect.
 
 | Control | Default | Notes |
 |---------|---------|--------|
-| Size preset | **512×512** | 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, **8192 (8K)**. Click a row, or wheel over the card. |
+| Size preset | **512×512** | 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, **8192 (8K)**. Click a cell, or wheel over the card. |
 | Fit | **Pad** | Letterbox / pillarbox the full plane into the square. **Crop** trims to the occupied density AABB first, then pads. |
 | Aspect | **Square** | Advanced: **Native** keeps the extracted slab width×height (old behavior). Size presets apply only to square. |
+| Formats | PNG MASK JSON SVG on | Click a chip to include or skip that file. At least one file stays armed. |
+| Heightmap | **off** | Click the HEIGHT row, or press `M`. `Y` still picks the axis and turns this on. |
 
-Formats are unchanged: PNG, density mask, JSON, SVG, optional heightmap (`M` / `Y`). The card lists those names; heightmap stays a key toggle.
+PNG, density mask, JSON, SVG, and optional heightmap (`M` / `Y`) are the same files as before; the card toggles are live, not labels.
 
 PNG / mask / SVG / `density_u8` are written at the chosen output size. JSON also records `export_aspect`, `export_fit`, `export_preset`, `source_width`, and `source_height`.
 

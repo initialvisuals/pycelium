@@ -7,8 +7,8 @@
 
 use crate::cutter::{SLIDER_X0, SLIDER_X1, SLIDER_Y0, SLIDER_Y1};
 use crate::export_settings::{
-    ASPECT_Y0, ASPECT_Y1, CHIP_Y0, CHIP_Y1, FIT_Y0, FIT_Y1, PANEL_X0, PANEL_X1, PANEL_Y1,
-    PRESET_ROW, PRESET_Y0, SQUARE_PRESETS,
+    ASPECT_Y0, ASPECT_Y1, CHIP_Y0, CHIP_Y1, FIT_Y0, FIT_Y1, FORMAT_Y0, FORMAT_Y1, HT_Y0, HT_Y1,
+    PANEL_X0, PANEL_X1, PANEL_Y1, PRESET_ROW, PRESET_ROWS, PRESET_Y0, SQUARE_PRESETS,
 };
 use crate::hud_font;
 
@@ -16,12 +16,18 @@ pub const HELP_COLS: usize = 26;
 pub const HELP_ROWS: usize = 22;
 pub const TIP_COLS: usize = 36;
 pub const TIP_ROWS: usize = 8;
+pub const NUDGE_COLS: usize = 28;
+pub const NUDGE_ROWS: usize = 3;
 pub const HELP_BASE: usize = 0;
 pub const TIP_BASE: usize = HELP_COLS * HELP_ROWS;
+pub const NUDGE_BASE: usize = TIP_BASE + TIP_COLS * TIP_ROWS;
 pub const OVERLAY_WORDS: usize = 1024;
 
-const HUD_X0: f32 = 0.008;
-const HUD_X1: f32 = 0.250;
+pub const HUD_X0: f32 = 0.008;
+pub const HUD_X1: f32 = 0.250;
+/// Thin framed tracks on SLICE Z / THICK / ZOOM / PARAM. Match `present.wgsl`.
+pub const SLIDER_TRACK_X0: f32 = 0.128;
+pub const SLIDER_TRACK_X1: f32 = 0.246;
 const INSET: [f32; 4] = [0.72, 0.06, 0.98, 0.34];
 
 /// Bottom-right, under the slab inset. When the export card is fully open
@@ -84,6 +90,8 @@ pub enum HoverId {
     ExportSize,
     ExportFit,
     ExportAspect,
+    ExportFormat,
+    ExportHeightmap,
 }
 
 #[derive(Clone, Debug)]
@@ -93,6 +101,7 @@ pub struct OverlayGpu {
     pub help_rect: [f32; 4],
     pub tip_rect: [f32; 4],
     pub callout: [f32; 4],
+    pub nudge_rect: [f32; 4],
 }
 
 impl Default for OverlayGpu {
@@ -103,7 +112,87 @@ impl Default for OverlayGpu {
             help_rect: [0.0; 4],
             tip_rect: [0.0; 4],
             callout: [0.0; 4],
+            nudge_rect: [0.0; 4],
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HudSlider {
+    SliceZ,
+    Thick,
+    Zoom,
+    Param,
+}
+
+impl HudSlider {
+    pub fn keys(self) -> &'static str {
+        match self {
+            Self::SliceZ => "[ ] DEPTH  SHIFT COARSE",
+            Self::Thick => "; ' THICK  SHIFT COARSE",
+            Self::Zoom => ", . ZOOM  SHIFT COARSE",
+            Self::Param => "1-8 SELECT  -/= NUDGE",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NudgeKind {
+    Param,
+    SliceZ,
+    Thick,
+    Zoom,
+    Pan,
+}
+
+impl NudgeKind {
+    pub fn keys(self) -> &'static str {
+        match self {
+            Self::Param => "1-8 SELECT  -/= NUDGE",
+            Self::SliceZ => "[ ] DEPTH  SHIFT COARSE",
+            Self::Thick => "; ' THICK  SHIFT COARSE",
+            Self::Zoom => ", . ZOOM  SHIFT COARSE",
+            Self::Pan => "ARROWS PAN  SHIFT COARSE",
+        }
+    }
+
+    fn row_y(self) -> f32 {
+        match self {
+            Self::Param => 0.908,
+            Self::SliceZ => 0.570,
+            Self::Thick => 0.612,
+            Self::Zoom | Self::Pan => 0.656,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct NudgeToast {
+    pub kind: NudgeKind,
+    pub title: String,
+    pub value: String,
+    pub keys: String,
+    pub fade: f32,
+}
+
+pub fn slider_t(x: f32) -> f32 {
+    ((x - SLIDER_TRACK_X0) / (SLIDER_TRACK_X1 - SLIDER_TRACK_X0)).clamp(0.0, 1.0)
+}
+
+pub fn hud_slider_at(uv: (f32, f32)) -> Option<HudSlider> {
+    if uv.0 < HUD_X0 || uv.0 > HUD_X1 {
+        return None;
+    }
+    if uv.1 >= 0.548 && uv.1 < 0.592 {
+        Some(HudSlider::SliceZ)
+    } else if uv.1 >= 0.592 && uv.1 < 0.634 {
+        Some(HudSlider::Thick)
+    } else if uv.1 >= 0.634 && uv.1 < 0.682 {
+        Some(HudSlider::Zoom)
+    } else if uv.1 >= 0.878 && uv.1 < 0.940 {
+        Some(HudSlider::Param)
+    } else {
+        None
     }
 }
 
@@ -199,10 +288,21 @@ pub fn hit_test(
         }
         if export_panel_open && cursor.0 >= PANEL_X0 && cursor.0 <= PANEL_X1 {
             if cursor.1 >= PRESET_Y0
-                && cursor.1 < PRESET_Y0 + PRESET_ROW * SQUARE_PRESETS.len() as f32
+                && cursor.1 < PRESET_Y0 + PRESET_ROW * PRESET_ROWS as f32
             {
                 let mid = cursor.1;
-                return (HoverId::ExportSize, [PANEL_X0, mid]);
+                let i = {
+                    let row = ((cursor.1 - PRESET_Y0) / PRESET_ROW).floor() as i32;
+                    let col = if cursor.0 < 0.5 * (PANEL_X0 + PANEL_X1) {
+                        0
+                    } else {
+                        1
+                    };
+                    row * 2 + col
+                };
+                if i >= 0 && (i as usize) < SQUARE_PRESETS.len() {
+                    return (HoverId::ExportSize, [PANEL_X0, mid]);
+                }
             }
             if cursor.1 >= FIT_Y0 && cursor.1 <= FIT_Y1 {
                 return (HoverId::ExportFit, [PANEL_X0, 0.5 * (FIT_Y0 + FIT_Y1)]);
@@ -211,6 +311,18 @@ pub fn hit_test(
                 return (
                     HoverId::ExportAspect,
                     [PANEL_X0, 0.5 * (ASPECT_Y0 + ASPECT_Y1)],
+                );
+            }
+            if cursor.1 >= FORMAT_Y0 && cursor.1 <= FORMAT_Y1 {
+                return (
+                    HoverId::ExportFormat,
+                    [PANEL_X0, 0.5 * (FORMAT_Y0 + FORMAT_Y1)],
+                );
+            }
+            if cursor.1 >= HT_Y0 && cursor.1 <= HT_Y1 {
+                return (
+                    HoverId::ExportHeightmap,
+                    [PANEL_X0, 0.5 * (HT_Y0 + HT_Y1)],
                 );
             }
             if cursor.1 >= CHIP_Y0 && cursor.1 <= PANEL_Y1 {
@@ -253,6 +365,7 @@ pub fn pack_overlay(
     anchor: [f32; 2],
     help_fade: f32,
     tip_fade: f32,
+    nudge: Option<&NudgeToast>,
 ) -> OverlayGpu {
     let mut out = OverlayGpu::default();
     let help = scheme_rect(export_panel_open && capturing);
@@ -269,9 +382,20 @@ pub fn pack_overlay(
         attach = tip_attach(anchor, tip);
     }
 
+    let mut nudge_rect = [0.0; 4];
+    let mut nudge_fade = 0.0;
+    if let Some(toast) = nudge {
+        if toast.fade > 0.004 {
+            pack_nudge(&mut out.chars, toast);
+            nudge_rect = place_nudge(toast.kind, help, scheme_on);
+            nudge_fade = toast.fade;
+        }
+    }
+
     out.tip_rect = tip;
     out.callout = [anchor[0], anchor[1], attach[0], attach[1]];
-    out.overlay_ui = [help_fade, tip_fade, 0.0, 0.0];
+    out.nudge_rect = nudge_rect;
+    out.overlay_ui = [help_fade, tip_fade, nudge_fade, 0.0];
     out
 }
 
@@ -281,6 +405,30 @@ fn pack_scheme(chars: &mut [u32]) {
         line.push_str(spec.action);
         blit_line(chars, HELP_BASE, HELP_COLS, row, &line);
     }
+}
+
+fn pack_nudge(chars: &mut [u32], toast: &NudgeToast) {
+    blit_line(chars, NUDGE_BASE, NUDGE_COLS, 0, &toast.title);
+    blit_line(chars, NUDGE_BASE, NUDGE_COLS, 1, &toast.value);
+    blit_line(chars, NUDGE_BASE, NUDGE_COLS, 2, &toast.keys);
+}
+
+fn place_nudge(kind: NudgeKind, help: [f32; 4], scheme_on: bool) -> [f32; 4] {
+    let w = 0.268;
+    let h = 0.074;
+    let mut x = 0.258;
+    let mut y = (kind.row_y() - 0.012).clamp(0.012, 0.984 - h);
+    let mut rect = [x, y, x + w, y + h];
+    if scheme_on && rects_overlap(rect, help) {
+        x = (help[2] + 0.012).min(0.990 - w);
+        rect = [x, y, x + w, y + h];
+        if rects_overlap(rect, help) {
+            y = (help[1] - h - 0.012).max(0.012);
+            x = 0.258;
+            rect = [x, y, x + w, y + h];
+        }
+    }
+    rect
 }
 
 fn pack_tip(chars: &mut [u32], id: HoverId) -> usize {
@@ -405,13 +553,13 @@ fn tip_text(id: HoverId) -> &'static str {
             "Uncleaved polymer: raw litter. The fungus cannot eat this until exoenzyme works. A brown bar falling while SOL C rises is the digestion story. This is the pantry still wrapped, not the meal."
         }
         HoverId::SliceZ => {
-            "Depth of the orange view slab and the right-hand inset, in voxels. Keys [ ] move it. This is a viewing plane, not a capture export (press E for that). Shift makes the step coarse."
+            "Depth of the orange view slab and the right-hand inset, in voxels. Keys [ ] move it, or drag the framed slider. This is a viewing plane, not a capture export (press E for that). Shift makes the step coarse."
         }
         HoverId::Thick => {
-            "How many voxels the view slab integrates. Semicolon and quote change it. Thicker slabs stack more layers in the inset so faint hyphae show up. This does not drive the capture cutter."
+            "How many voxels the view slab integrates. Semicolon and quote change it, or drag the framed slider. Thicker slabs stack more layers in the inset so faint hyphae show up. This does not drive the capture cutter."
         }
         HoverId::Zoom => {
-            "How much of the XY field the inset shows, as percent. Comma and period zoom; arrows pan. Shift makes these coarse. It is a loupe on the current Z slab, not camera orbit."
+            "How much of the XY field the inset shows, as percent. Comma and period zoom, arrows pan, or drag the framed slider. Shift makes these coarse. It is a loupe on the current Z slab, not camera orbit."
         }
         HoverId::Tip => {
             "Which apical slot you clicked. Click in the volume to pick the nearest live tip. Capture mode disables pick. Sparse Tab mode keeps this block readable after a pick."
@@ -426,7 +574,7 @@ fn tip_text(id: HoverId) -> &'static str {
             "Internal carbon the picked tip is carrying (shown times 100). Extension and branching spend this. A starved tip stops growing even if soil food is nearby, until uptake refills it."
         }
         HoverId::Param | HoverId::ParamKeys => {
-            "Live knob 1-8: chemotropism, nitrotropism, autotropism, persistence, maintenance, enzyme_k, branch cost, extension. Keys 1-8 select the slot. Minus and equals nudge the value. These do not change RAM presets."
+            "Live knob 1-8: chemotropism, nitrotropism, autotropism, persistence, maintenance, enzyme_k, branch cost, extension. Keys 1-8 select the slot. Minus and equals nudge, or drag the framed slider. A toast shows the name, value, and keys while you tweak."
         }
         HoverId::Help => {
             "H toggles this corner control-scheme panel, always, including in capture. It never writes a heightmap. Hover a row here, or a left HUD meter, for a teach callout on a white string."
@@ -498,7 +646,13 @@ fn tip_text(id: HoverId) -> &'static str {
             "Orthogonal squash of hypha (teal) plus soluble C (rust) in the current Z slab. Same depth, thickness, and zoom as the SLICE Z / THICK / ZOOM meters. Not the capture bake."
         }
         HoverId::ExportSize => {
-            "Square power-of-two export size, 8 through 8192 (8K). Click a row or wheel over the card. Applies when aspect is square. PNG, mask, SVG, and density_u8 use this canvas."
+            "Square power-of-two export size, 8 through 8192 (8K). Click a cell or wheel over the card. Applies when aspect is square. PNG, mask, SVG, and density_u8 use this canvas."
+        }
+        HoverId::ExportFormat => {
+            "Click PNG, MASK, JSON, or SVG to include or skip that file on the next Enter write. At least one file stays armed. These used to be labels only."
+        }
+        HoverId::ExportHeightmap => {
+            "Click to arm the optional heightmap PNG (same as M). Y still picks the height axis. H never writes a heightmap."
         }
     }
 }
@@ -518,6 +672,7 @@ mod tests {
         assert_eq!(m.keys, "M");
         assert_eq!(SCHEME_ROWS.len(), HELP_ROWS);
         assert!(TIP_BASE + TIP_COLS * TIP_ROWS <= OVERLAY_WORDS);
+        assert!(NUDGE_BASE + NUDGE_COLS * NUDGE_ROWS <= OVERLAY_WORDS);
     }
 
     #[test]
@@ -543,6 +698,10 @@ mod tests {
         assert_eq!(id, HoverId::Slider);
         let (id, _) = hit_test((0.80, 0.18), false, false, false);
         assert_eq!(id, HoverId::Inset);
+        let (id, _) = hit_test((0.76, 0.768), false, true, true);
+        assert_eq!(id, HoverId::ExportFormat);
+        let (id, _) = hit_test((0.86, 0.816), false, true, true);
+        assert_eq!(id, HoverId::ExportHeightmap);
     }
 
     #[test]
@@ -554,6 +713,9 @@ mod tests {
         assert!(wrap_text(tip_text(HoverId::Hypha), TIP_COLS).len() <= TIP_ROWS);
         assert!(wrap_text(tip_text(HoverId::Fusions), TIP_COLS).len() <= TIP_ROWS);
         assert!(wrap_text(tip_text(HoverId::Tab), TIP_COLS).len() <= TIP_ROWS);
+        assert!(wrap_text(tip_text(HoverId::Param), TIP_COLS).len() <= TIP_ROWS);
+        assert!(wrap_text(tip_text(HoverId::ExportFormat), TIP_COLS).len() <= TIP_ROWS);
+        assert!(wrap_text(tip_text(HoverId::ExportHeightmap), TIP_COLS).len() <= TIP_ROWS);
     }
 
     #[test]
@@ -567,11 +729,50 @@ mod tests {
             [0.25, 0.11],
             1.0,
             1.0,
+            None,
         );
         assert_eq!(gpu.chars[0], hud_font::encode_char('H'));
         assert!(gpu.chars[TIP_BASE] > 0);
         assert!(gpu.overlay_ui[0] > 0.5);
         assert!(gpu.tip_rect[2] > gpu.tip_rect[0]);
+    }
+
+    #[test]
+    fn pack_writes_nudge_toast() {
+        let toast = NudgeToast {
+            kind: NudgeKind::Param,
+            title: "1 CHEMOTROPISM".into(),
+            value: "1.06 TO 1.10".into(),
+            keys: NudgeKind::Param.keys().into(),
+            fade: 1.0,
+        };
+        let gpu = pack_overlay(
+            false,
+            false,
+            false,
+            HoverId::None,
+            (0.20, 0.90),
+            [0.25, 0.90],
+            0.0,
+            0.0,
+            Some(&toast),
+        );
+        assert_eq!(gpu.chars[NUDGE_BASE], hud_font::encode_char('1'));
+        assert!(gpu.overlay_ui[2] > 0.5);
+        assert!(gpu.nudge_rect[2] > gpu.nudge_rect[0]);
+        assert!(gpu.nudge_rect[0] >= HUD_X1);
+    }
+
+    #[test]
+    fn hud_slider_rows_match_left_panel() {
+        assert_eq!(hud_slider_at((0.16, 0.570)), Some(HudSlider::SliceZ));
+        assert_eq!(hud_slider_at((0.16, 0.610)), Some(HudSlider::Thick));
+        assert_eq!(hud_slider_at((0.16, 0.650)), Some(HudSlider::Zoom));
+        assert_eq!(hud_slider_at((0.16, 0.910)), Some(HudSlider::Param));
+        assert!(hud_slider_at((0.16, 0.110)).is_none());
+        assert!(hud_slider_at((0.40, 0.910)).is_none());
+        assert!((slider_t(SLIDER_TRACK_X0) - 0.0).abs() < 1e-5);
+        assert!((slider_t(SLIDER_TRACK_X1) - 1.0).abs() < 1e-5);
     }
 
     #[test]

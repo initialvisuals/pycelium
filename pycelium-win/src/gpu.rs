@@ -431,6 +431,10 @@ impl MyceliumGpu {
         self.uniforms.adjust(self.param_slot, delta);
     }
 
+    pub fn set_param_normalized(&mut self, t: f32) {
+        self.uniforms.set_normalized(self.param_slot, t);
+    }
+
     pub fn upload_brick(&self, queue: &wgpu::Queue, world: &HostWorld) {
         let brick = world.extract_brick(self.width, self.height, self.depth);
         queue.write_buffer(&self.organic, 0, bytemuck::cast_slice(&brick.organic));
@@ -507,6 +511,7 @@ impl MyceliumGpu {
             help_rect: overlay.help_rect,
             tip_rect: overlay.tip_rect,
             callout: overlay.callout,
+            nudge_rect: overlay.nudge_rect,
         };
         queue.write_buffer(&self.present_buf, 0, bytemuck::bytes_of(&present));
         queue.write_buffer(&self.overlay_buf, 0, bytemuck::cast_slice(&overlay.chars));

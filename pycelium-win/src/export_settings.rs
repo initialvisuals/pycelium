@@ -1,7 +1,12 @@
-//! Export settings window: square power-of-two presets, pad vs crop, native aspect.
+//! Export settings window: square power-of-two presets, pad vs crop, native aspect,
+//! and optional format toggles.
 //!
 //! Drawn as an in-engine card on the right (below the slab inset) while capturing.
 //! Geometry here must match `shaders/present.wgsl`.
+//!
+//! The previous 11-row preset stack plus FIT / ASPECT / format labels overflowed:
+//! FIT sat on the 8K row, and SVG painted past the card / window. Presets are now
+//! two columns so the full card stays above the thickness slider (`y=0.90`).
 
 /// Square power-of-two export sizes, 8 through 8K.
 pub const SQUARE_PRESETS: [u32; 11] = [
@@ -16,14 +21,20 @@ pub const DEFAULT_PRESET_INDEX: usize = 6;
 pub const PANEL_X0: f32 = 0.735;
 pub const PANEL_X1: f32 = 0.985;
 pub const CHIP_Y0: f32 = 0.368;
-pub const CHIP_Y1: f32 = 0.418;
-pub const PANEL_Y1: f32 = 0.882;
-pub const PRESET_Y0: f32 = 0.448;
-pub const PRESET_ROW: f32 = 0.028;
-pub const FIT_Y0: f32 = 0.768;
-pub const FIT_Y1: f32 = 0.808;
-pub const ASPECT_Y0: f32 = 0.816;
-pub const ASPECT_Y1: f32 = 0.856;
+pub const CHIP_Y1: f32 = 0.412;
+pub const PANEL_Y1: f32 = 0.848;
+pub const PRESET_Y0: f32 = 0.440;
+pub const PRESET_ROW: f32 = 0.032;
+pub const PRESET_COLS: usize = 2;
+pub const PRESET_ROWS: usize = 6;
+pub const FIT_Y0: f32 = 0.644;
+pub const FIT_Y1: f32 = 0.684;
+pub const ASPECT_Y0: f32 = 0.692;
+pub const ASPECT_Y1: f32 = 0.732;
+pub const FORMAT_Y0: f32 = 0.748;
+pub const FORMAT_Y1: f32 = 0.788;
+pub const HT_Y0: f32 = 0.796;
+pub const HT_Y1: f32 = 0.836;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExportAspect {
@@ -74,11 +85,33 @@ impl FitMode {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExportFormat {
+    Png,
+    Mask,
+    Json,
+    Svg,
+    Heightmap,
+}
+
+impl ExportFormat {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Mask => "mask",
+            Self::Json => "json",
+            Self::Svg => "svg",
+            Self::Heightmap => "heightmap",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExportHit {
     TogglePanel,
     Preset(usize),
     Fit(FitMode),
     Aspect(ExportAspect),
+    Format(ExportFormat),
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +120,11 @@ pub struct ExportSettings {
     pub aspect: ExportAspect,
     pub preset_index: usize,
     pub fit: FitMode,
+    pub write_png: bool,
+    pub write_mask: bool,
+    pub write_json: bool,
+    pub write_svg: bool,
+    pub write_heightmap: bool,
 }
 
 impl Default for ExportSettings {
@@ -96,6 +134,11 @@ impl Default for ExportSettings {
             aspect: ExportAspect::Square,
             preset_index: DEFAULT_PRESET_INDEX,
             fit: FitMode::Pad,
+            write_png: true,
+            write_mask: true,
+            write_json: true,
+            write_svg: true,
+            write_heightmap: false,
         }
     }
 }
@@ -125,39 +168,101 @@ impl ExportSettings {
         self.panel_open = false;
     }
 
+    pub fn toggle_format(&mut self, format: ExportFormat) {
+        match format {
+            ExportFormat::Png => self.write_png = !self.write_png,
+            ExportFormat::Mask => self.write_mask = !self.write_mask,
+            ExportFormat::Json => self.write_json = !self.write_json,
+            ExportFormat::Svg => self.write_svg = !self.write_svg,
+            ExportFormat::Heightmap => self.write_heightmap = !self.write_heightmap,
+        }
+        // Enter should still write something if the user turns every file off.
+        if !self.write_png
+            && !self.write_mask
+            && !self.write_json
+            && !self.write_svg
+            && !self.write_heightmap
+        {
+            self.write_png = true;
+        }
+    }
+
+    pub fn format_on(&self, format: ExportFormat) -> bool {
+        match format {
+            ExportFormat::Png => self.write_png,
+            ExportFormat::Mask => self.write_mask,
+            ExportFormat::Json => self.write_json,
+            ExportFormat::Svg => self.write_svg,
+            ExportFormat::Heightmap => self.write_heightmap,
+        }
+    }
+
     pub fn describe(&self) -> String {
+        let mut formats = String::new();
+        for (on, name) in [
+            (self.write_png, "png"),
+            (self.write_mask, "mask"),
+            (self.write_json, "json"),
+            (self.write_svg, "svg"),
+            (self.write_heightmap, "height"),
+        ] {
+            if on {
+                if !formats.is_empty() {
+                    formats.push(' ');
+                }
+                formats.push_str(name);
+            }
+        }
         if self.aspect == ExportAspect::Native {
             format!(
-                "native {}  {}",
+                "native {}  {}  {}",
                 self.fit.as_str(),
-                self.square_size()
+                self.square_size(),
+                formats
             )
         } else {
             format!(
-                "{}x{} {}  {}",
+                "{}x{} {}  {}  {}",
                 self.square_size(),
                 self.square_size(),
                 self.aspect.as_str(),
-                self.fit.as_str()
+                self.fit.as_str(),
+                formats
             )
         }
     }
 
-    /// Packed present uniform: x = open, y = preset index, z = aspect, w = fit.
+    /// Packed present uniform: x = open, y = preset index,
+    /// z = flags (bit0 native, bit1 crop, bit2 png, bit3 mask, bit4 json,
+    /// bit5 svg, bit6 heightmap).
     pub fn present_vec(&self) -> [f32; 4] {
+        let mut flags = 0u32;
+        if self.aspect == ExportAspect::Native {
+            flags |= 1;
+        }
+        if self.fit == FitMode::CropAabb {
+            flags |= 2;
+        }
+        if self.write_png {
+            flags |= 4;
+        }
+        if self.write_mask {
+            flags |= 8;
+        }
+        if self.write_json {
+            flags |= 16;
+        }
+        if self.write_svg {
+            flags |= 32;
+        }
+        if self.write_heightmap {
+            flags |= 64;
+        }
         [
             if self.panel_open { 1.0 } else { 0.0 },
             self.preset_index as f32,
-            if self.aspect == ExportAspect::Native {
-                1.0
-            } else {
-                0.0
-            },
-            if self.fit == FitMode::CropAabb {
-                1.0
-            } else {
-                0.0
-            },
+            flags as f32,
+            0.0,
         ]
     }
 
@@ -172,6 +277,41 @@ impl ExportSettings {
         }
     }
 
+    fn preset_index_at(uv: (f32, f32)) -> Option<usize> {
+        let rows = PRESET_ROWS as f32;
+        if uv.1 < PRESET_Y0 || uv.1 >= PRESET_Y0 + PRESET_ROW * rows {
+            return None;
+        }
+        let row = ((uv.1 - PRESET_Y0) / PRESET_ROW).floor() as i32;
+        if !(0..PRESET_ROWS as i32).contains(&row) {
+            return None;
+        }
+        let mid = 0.5 * (PANEL_X0 + PANEL_X1);
+        let col = if uv.0 < mid { 0 } else { 1 };
+        let i = row as usize * PRESET_COLS + col;
+        if i < SQUARE_PRESETS.len() {
+            Some(i)
+        } else {
+            None
+        }
+    }
+
+    fn format_at(uv: (f32, f32)) -> Option<ExportFormat> {
+        if uv.1 >= FORMAT_Y0 && uv.1 <= FORMAT_Y1 {
+            let t = ((uv.0 - PANEL_X0) / (PANEL_X1 - PANEL_X0)).clamp(0.0, 0.999);
+            return Some(match (t * 4.0).floor() as i32 {
+                0 => ExportFormat::Png,
+                1 => ExportFormat::Mask,
+                2 => ExportFormat::Json,
+                _ => ExportFormat::Svg,
+            });
+        }
+        if uv.1 >= HT_Y0 && uv.1 <= HT_Y1 {
+            return Some(ExportFormat::Heightmap);
+        }
+        None
+    }
+
     pub fn hit(&self, uv: (f32, f32)) -> Option<ExportHit> {
         if uv.0 < PANEL_X0 || uv.0 > PANEL_X1 {
             return None;
@@ -182,11 +322,8 @@ impl ExportSettings {
         if !self.panel_open {
             return None;
         }
-        if uv.1 >= PRESET_Y0 && uv.1 < PRESET_Y0 + PRESET_ROW * SQUARE_PRESETS.len() as f32 {
-            let i = ((uv.1 - PRESET_Y0) / PRESET_ROW).floor() as i32;
-            if (0..SQUARE_PRESETS.len() as i32).contains(&i) {
-                return Some(ExportHit::Preset(i as usize));
-            }
+        if let Some(i) = Self::preset_index_at(uv) {
+            return Some(ExportHit::Preset(i));
         }
         let mid = 0.5 * (PANEL_X0 + PANEL_X1);
         if uv.1 >= FIT_Y0 && uv.1 <= FIT_Y1 {
@@ -203,6 +340,9 @@ impl ExportSettings {
                 ExportHit::Aspect(ExportAspect::Native)
             });
         }
+        if let Some(fmt) = Self::format_at(uv) {
+            return Some(ExportHit::Format(fmt));
+        }
         None
     }
 
@@ -212,6 +352,7 @@ impl ExportSettings {
             ExportHit::Preset(i) => self.set_preset(i),
             ExportHit::Fit(fit) => self.fit = fit,
             ExportHit::Aspect(aspect) => self.aspect = aspect,
+            ExportHit::Format(fmt) => self.toggle_format(fmt),
         }
     }
 }
@@ -227,6 +368,8 @@ mod tests {
         assert_eq!(s.aspect, ExportAspect::Square);
         assert_eq!(s.fit, FitMode::Pad);
         assert!(!s.panel_open);
+        assert!(s.write_png && s.write_mask && s.write_json && s.write_svg);
+        assert!(!s.write_heightmap);
         assert_eq!(SQUARE_PRESETS[s.preset_index], 512);
     }
 
@@ -254,10 +397,7 @@ mod tests {
     #[test]
     fn closed_chip_toggles_panel() {
         let s = ExportSettings::default();
-        assert_eq!(
-            s.hit((0.86, 0.39)),
-            Some(ExportHit::TogglePanel)
-        );
+        assert_eq!(s.hit((0.86, 0.39)), Some(ExportHit::TogglePanel));
         assert!(s.hit((0.86, 0.50)).is_none());
         assert!(s.contains_cursor((0.86, 0.39)));
         assert!(!s.contains_cursor((0.86, 0.50)));
@@ -265,28 +405,64 @@ mod tests {
     }
 
     #[test]
-    fn open_panel_hits_presets_fit_and_aspect() {
+    fn open_panel_hits_two_column_presets_fit_aspect_and_formats() {
         let mut s = ExportSettings::default();
         s.panel_open = true;
-        assert_eq!(s.hit((0.86, PRESET_Y0 + 0.01)), Some(ExportHit::Preset(0)));
-        let y512 = PRESET_Y0 + PRESET_ROW * 6.0 + 0.01;
-        assert_eq!(s.hit((0.86, y512)), Some(ExportHit::Preset(6)));
-        let y8k = PRESET_Y0 + PRESET_ROW * 10.0 + 0.01;
-        assert_eq!(s.hit((0.86, y8k)), Some(ExportHit::Preset(10)));
-        assert_eq!(s.hit((0.76, 0.788)), Some(ExportHit::Fit(FitMode::Pad)));
+        // 8 is left cell of row 0; 16 is right cell.
         assert_eq!(
-            s.hit((0.92, 0.788)),
+            s.hit((0.76, PRESET_Y0 + 0.01)),
+            Some(ExportHit::Preset(0))
+        );
+        assert_eq!(
+            s.hit((0.92, PRESET_Y0 + 0.01)),
+            Some(ExportHit::Preset(1))
+        );
+        // 512 is left cell of row 3 (index 6).
+        let y512 = PRESET_Y0 + PRESET_ROW * 3.0 + 0.01;
+        assert_eq!(s.hit((0.76, y512)), Some(ExportHit::Preset(6)));
+        // 8192 is left cell of row 5 (index 10); right cell is empty.
+        let y8k = PRESET_Y0 + PRESET_ROW * 5.0 + 0.01;
+        assert_eq!(s.hit((0.76, y8k)), Some(ExportHit::Preset(10)));
+        assert!(s.hit((0.92, y8k)).is_none());
+        assert_eq!(s.hit((0.76, 0.664)), Some(ExportHit::Fit(FitMode::Pad)));
+        assert_eq!(
+            s.hit((0.92, 0.664)),
             Some(ExportHit::Fit(FitMode::CropAabb))
         );
         assert_eq!(
-            s.hit((0.76, 0.836)),
+            s.hit((0.76, 0.712)),
             Some(ExportHit::Aspect(ExportAspect::Square))
         );
         assert_eq!(
-            s.hit((0.92, 0.836)),
+            s.hit((0.92, 0.712)),
             Some(ExportHit::Aspect(ExportAspect::Native))
         );
+        let span = PANEL_X1 - PANEL_X0;
+        assert_eq!(
+            s.hit((PANEL_X0 + span * 0.12, 0.768)),
+            Some(ExportHit::Format(ExportFormat::Png))
+        );
+        assert_eq!(
+            s.hit((PANEL_X0 + span * 0.38, 0.768)),
+            Some(ExportHit::Format(ExportFormat::Mask))
+        );
+        assert_eq!(
+            s.hit((PANEL_X0 + span * 0.62, 0.768)),
+            Some(ExportHit::Format(ExportFormat::Json))
+        );
+        assert_eq!(
+            s.hit((PANEL_X0 + span * 0.88, 0.768)),
+            Some(ExportHit::Format(ExportFormat::Svg))
+        );
+        assert_eq!(
+            s.hit((0.86, 0.816)),
+            Some(ExportHit::Format(ExportFormat::Heightmap))
+        );
         assert!(s.contains_cursor((0.86, 0.70)));
+        assert!(PANEL_Y1 < 0.90, "card must sit above the thickness slider");
+        assert!(FIT_Y0 >= PRESET_Y0 + PRESET_ROW * PRESET_ROWS as f32);
+        assert!(FORMAT_Y1 <= HT_Y0);
+        assert!(HT_Y1 <= PANEL_Y1);
     }
 
     #[test]
@@ -300,16 +476,34 @@ mod tests {
         assert_eq!(s.aspect, ExportAspect::Native);
         s.apply_hit(ExportHit::TogglePanel);
         assert!(s.panel_open);
+        s.apply_hit(ExportHit::Format(ExportFormat::Svg));
+        assert!(!s.write_svg);
+        s.apply_hit(ExportHit::Format(ExportFormat::Heightmap));
+        assert!(s.write_heightmap);
+    }
+
+    #[test]
+    fn last_format_stays_on() {
+        let mut s = ExportSettings::default();
+        s.write_mask = false;
+        s.write_json = false;
+        s.write_svg = false;
+        s.toggle_format(ExportFormat::Png);
+        assert!(s.write_png, "PNG should snap back on if it was the last file");
     }
 
     #[test]
     fn present_vec_packs_flags() {
         let mut s = ExportSettings::default();
-        assert_eq!(s.present_vec(), [0.0, 6.0, 0.0, 0.0]);
+        // default: square, pad, png+mask+json+svg = bits 2+3+4+5 = 4+8+16+32 = 60
+        assert_eq!(s.present_vec(), [0.0, 6.0, 60.0, 0.0]);
         s.panel_open = true;
         s.aspect = ExportAspect::Native;
         s.fit = FitMode::CropAabb;
         s.preset_index = 3;
-        assert_eq!(s.present_vec(), [1.0, 3.0, 1.0, 1.0]);
+        s.write_heightmap = true;
+        s.write_svg = false;
+        // native+crop+png+mask+json+height = 1+2+4+8+16+64 = 95
+        assert_eq!(s.present_vec(), [1.0, 3.0, 95.0, 0.0]);
     }
 }

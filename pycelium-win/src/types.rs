@@ -125,6 +125,18 @@ impl SimUniforms {
         }
     }
 
+    /// Inclusive knob range. Must stay in lockstep with `present.wgsl` `param_fill`.
+    pub fn param_range(slot: u32) -> (f32, f32) {
+        match slot % 8 {
+            0 | 1 | 2 => (0.0, 3.0),
+            3 => (0.2, 3.0),
+            4 => (0.0, 0.02),
+            5 => (0.0, 0.12),
+            6 => (0.1, 2.0),
+            _ => (0.2, 2.2),
+        }
+    }
+
     pub fn param_value(&self, slot: u32) -> f32 {
         match slot % 8 {
             0 => self.chemo_weight,
@@ -138,18 +150,33 @@ impl SimUniforms {
         }
     }
 
-    pub fn adjust(&mut self, slot: u32, delta: f32) {
-        let scale = |v: &mut f32, lo, hi| *v = (*v + delta).clamp(lo, hi);
+    pub fn param_normalized(&self, slot: u32) -> f32 {
+        let (lo, hi) = Self::param_range(slot);
+        ((self.param_value(slot) - lo) / (hi - lo).max(1.0e-8)).clamp(0.0, 1.0)
+    }
+
+    pub fn set_param(&mut self, slot: u32, value: f32) {
+        let (lo, hi) = Self::param_range(slot);
+        let v = value.clamp(lo, hi);
         match slot % 8 {
-            0 => scale(&mut self.chemo_weight, 0.0, 3.0),
-            1 => scale(&mut self.nitro_weight, 0.0, 3.0),
-            2 => scale(&mut self.auto_weight, 0.0, 3.0),
-            3 => scale(&mut self.persist, 0.2, 3.0),
-            4 => scale(&mut self.maintenance, 0.0, 0.02),
-            5 => scale(&mut self.enzyme_k, 0.0, 0.12),
-            6 => scale(&mut self.branch_cost, 0.1, 2.0),
-            _ => scale(&mut self.max_extension, 0.2, 2.2),
+            0 => self.chemo_weight = v,
+            1 => self.nitro_weight = v,
+            2 => self.auto_weight = v,
+            3 => self.persist = v,
+            4 => self.maintenance = v,
+            5 => self.enzyme_k = v,
+            6 => self.branch_cost = v,
+            _ => self.max_extension = v,
         }
+    }
+
+    pub fn set_normalized(&mut self, slot: u32, t: f32) {
+        let (lo, hi) = Self::param_range(slot);
+        self.set_param(slot, lo + t.clamp(0.0, 1.0) * (hi - lo));
+    }
+
+    pub fn adjust(&mut self, slot: u32, delta: f32) {
+        self.set_param(slot, self.param_value(slot) + delta);
     }
 }
 
@@ -193,7 +220,7 @@ pub struct PresentUniforms {
     pub cutter: [f32; 4],
     /// Export settings card: x = panel open, y = preset index, z = native aspect, w = crop.
     pub export_ui: [f32; 4],
-    /// Overlay fades: x = scheme panel, y = teach tip.
+    /// Overlay fades: x = scheme panel, y = teach tip, z = nudge toast.
     pub overlay_ui: [f32; 4],
     /// Control-scheme panel UV rect (x0,y0,x1,y1).
     pub help_rect: [f32; 4],
@@ -201,6 +228,8 @@ pub struct PresentUniforms {
     pub tip_rect: [f32; 4],
     /// Elbow: xy = hovered control, zw = popup attach.
     pub callout: [f32; 4],
+    /// Live nudge toast UV rect (x0,y0,x1,y1).
+    pub nudge_rect: [f32; 4],
 }
 
 /// Orthogonal section through the pedon. Depth is the plane; thickness is
@@ -225,8 +254,41 @@ impl SliceView {
         }
     }
 
+    pub fn depth_lo_hi(max_z: f32) -> (f32, f32) {
+        (1.0, (max_z - 2.0).max(1.0))
+    }
+
+    pub fn depth_normalized(&self, max_z: f32) -> f32 {
+        let (lo, hi) = Self::depth_lo_hi(max_z);
+        ((self.z - lo) / (hi - lo).max(1.0e-8)).clamp(0.0, 1.0)
+    }
+
+    pub fn set_depth_normalized(&mut self, t: f32, max_z: f32) {
+        let (lo, hi) = Self::depth_lo_hi(max_z);
+        self.z = lo + t.clamp(0.0, 1.0) * (hi - lo);
+    }
+
+    pub fn thickness_normalized(&self, max_z: f32) -> f32 {
+        ((self.thickness - 1.0) / max_z.max(1.0).max(1.0e-8)).clamp(0.0, 1.0)
+    }
+
+    pub fn set_thickness_normalized(&mut self, t: f32, max_z: f32) {
+        self.thickness = 1.0 + t.clamp(0.0, 1.0) * max_z.max(1.0);
+        self.thickness = self.thickness.clamp(1.0, max_z.max(1.0));
+    }
+
+    pub fn zoom_normalized(&self) -> f32 {
+        ((self.zoom - 0.12) / 0.88).clamp(0.0, 1.0)
+    }
+
+    pub fn set_zoom_normalized(&mut self, t: f32) {
+        self.zoom = 0.12 + t.clamp(0.0, 1.0) * 0.88;
+        self.clamp_pan();
+    }
+
     pub fn nudge_depth(&mut self, delta: f32, max_z: f32) {
-        self.z = (self.z + delta).clamp(1.0, (max_z - 2.0).max(1.0));
+        let (lo, hi) = Self::depth_lo_hi(max_z);
+        self.z = (self.z + delta).clamp(lo, hi);
     }
 
     pub fn nudge_thickness(&mut self, delta: f32, max_z: f32) {
@@ -261,6 +323,36 @@ mod tests {
     fn present_uniforms_stay_16_byte_aligned() {
         assert_eq!(std::mem::size_of::<PresentUniforms>() % 16, 0);
         assert!(std::mem::size_of::<PresentUniforms>() >= 176);
-        assert_eq!(std::mem::size_of::<PresentUniforms>(), 16 * 16);
+        assert_eq!(std::mem::size_of::<PresentUniforms>(), 16 * 17);
+    }
+
+    #[test]
+    fn param_normalized_roundtrips_each_slot() {
+        let mut u = SimUniforms::new(32, 32, 16, 64);
+        for slot in 0..8 {
+            u.set_normalized(slot, 0.0);
+            assert!((u.param_normalized(slot) - 0.0).abs() < 1e-5);
+            u.set_normalized(slot, 1.0);
+            assert!((u.param_normalized(slot) - 1.0).abs() < 1e-5);
+            u.set_normalized(slot, 0.5);
+            assert!((u.param_normalized(slot) - 0.5).abs() < 1e-5);
+            let (lo, hi) = SimUniforms::param_range(slot);
+            assert!(u.param_value(slot) > lo - 1e-5 && u.param_value(slot) < hi + 1e-5);
+        }
+    }
+
+    #[test]
+    fn slice_normalized_roundtrips() {
+        let mut s = SliceView::new(40);
+        s.set_depth_normalized(0.0, 40.0);
+        assert!((s.z - 1.0).abs() < 1e-5);
+        s.set_depth_normalized(1.0, 40.0);
+        assert!((s.z - 38.0).abs() < 1e-5);
+        s.set_thickness_normalized(0.0, 40.0);
+        assert!((s.thickness - 1.0).abs() < 1e-5);
+        s.set_zoom_normalized(0.0);
+        assert!((s.zoom - 0.12).abs() < 1e-5);
+        s.set_zoom_normalized(1.0);
+        assert!((s.zoom - 1.0).abs() < 1e-5);
     }
 }

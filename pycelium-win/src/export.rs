@@ -401,19 +401,35 @@ pub fn write_exports_with_meta(
     let json = dir.join(format!("{stem}.json"));
     let svg = dir.join(format!("{stem}.svg"));
     let mask = dir.join(format!("{stem}_mask.png"));
-    let height = if cutter.export_heightmap {
+    let write_png = settings.map(|s| s.write_png).unwrap_or(true);
+    let write_mask = settings.map(|s| s.write_mask).unwrap_or(true);
+    let write_json = settings.map(|s| s.write_json).unwrap_or(true);
+    let write_svg = settings.map(|s| s.write_svg).unwrap_or(true);
+    let write_height = settings
+        .map(|s| s.write_heightmap)
+        .unwrap_or(cutter.export_heightmap)
+        || cutter.export_heightmap;
+    let height = if write_height {
         Some(dir.join(format!("{stem}_height.png")))
     } else {
         None
     };
 
-    write_density_png(&png, plane)?;
-    write_mask_png(&mask, plane)?;
+    if write_png {
+        write_density_png(&png, plane)?;
+    }
+    if write_mask {
+        write_mask_png(&mask, plane)?;
+    }
     if let Some(ref hpath) = height {
         write_height_png(hpath, plane)?;
     }
-    write_svg(&svg, plane)?;
-    write_json(&json, plane, cutter, grid, stamp, settings, source)?;
+    if write_svg {
+        write_svg(&svg, plane)?;
+    }
+    if write_json {
+        write_json(&json, plane, cutter, grid, stamp, settings, source)?;
+    }
 
     Ok(ExportPaths {
         png,
@@ -916,6 +932,41 @@ mod tests {
         assert!(json.contains("\"export_fit\": \"pad\""));
         assert!(json.contains("\"export_preset\": 512"));
         assert!(json.contains("\"source_width\": 8"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn format_toggles_skip_unselected_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "pycelium-slice-fmt-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let vol = brick(8, 8, 4, (2, 3, 1), 1.0);
+        let mut c = Cutter::new(4);
+        c.enter(1.0, 4);
+        c.pos = 0.25;
+        let plane = extract_slice(&vol, &c, false);
+        let mut settings = ExportSettings::default();
+        settings.write_svg = false;
+        settings.write_mask = false;
+        settings.write_heightmap = false;
+        let composed = apply_export_layout(&plane, &settings);
+        let paths = write_exports_with_meta(
+            &dir,
+            &composed,
+            &c,
+            (8, 8, 4),
+            "20260102_030405",
+            Some(&settings),
+            (plane.width, plane.height),
+        )
+        .unwrap();
+        assert!(paths.png.exists());
+        assert!(paths.json.exists());
+        assert!(!paths.svg.exists());
+        assert!(!paths.mask.exists());
+        assert!(paths.height.is_none());
         let _ = fs::remove_dir_all(&dir);
     }
 }

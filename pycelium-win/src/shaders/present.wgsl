@@ -52,6 +52,8 @@ struct PresentUniforms {
 @group(0) @binding(5) var<storage, read> organic: array<f32>;
 @group(0) @binding(6) var<storage, read> hud: array<u32>;
 @group(0) @binding(7) var<storage, read> tips: array<Tip>;
+@group(0) @binding(8) var font_tex: texture_2d<f32>;
+@group(0) @binding(9) var font_samp: sampler;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -119,7 +121,7 @@ fn digit(cell: vec2<f32>, n: i32) -> f32 {
 }
 
 fn draw_number(uv: vec2<f32>, origin: vec2<f32>, value: f32, digits: i32) -> f32 {
-    let local = (uv - origin) / vec2<f32>(0.014 * f32(digits), 0.028);
+    let local = (uv - origin) / vec2<f32>(0.0082 * f32(digits), 0.016);
     if local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0 {
         return 0.0;
     }
@@ -133,7 +135,7 @@ fn draw_number(uv: vec2<f32>, origin: vec2<f32>, value: f32, digits: i32) -> f32
 }
 
 fn bar(uv: vec2<f32>, origin: vec2<f32>, fill: f32, rgb: vec3<f32>) -> vec3<f32> {
-    let local = (uv - origin) / vec2<f32>(0.16, 0.016);
+    let local = (uv - origin) / vec2<f32>(0.11, 0.016);
     if local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0 {
         return vec3<f32>(0.0);
     }
@@ -146,47 +148,17 @@ fn px() -> vec2<f32> {
     return vec2<f32>(1.0 / max(f32(u.out_w), 1.0), 1.0 / max(f32(u.out_h), 1.0));
 }
 
-// 5×5 mono capitals. Packed row-major, bit 0 = top-left. Space = 0, A–Z = 1–26, ':' = 27.
-fn letter_bits(ch: i32) -> u32 {
-    switch ch {
-        case 1: { return 0x0118FE2Eu; }  // A
-        case 2: { return 0x00F8BE2Fu; }  // B
-        case 3: { return 0x01E0843Eu; }  // C
-        case 4: { return 0x00F8C62Fu; }  // D
-        case 5: { return 0x01F0BC3Fu; }  // E
-        case 6: { return 0x0010BC3Fu; }  // F
-        case 7: { return 0x01E8E43Eu; }  // G
-        case 8: { return 0x0118FE31u; }  // H
-        case 9: { return 0x01F2109Fu; }  // I
-        case 10: { return 0x0064A11Cu; } // J
-        case 11: { return 0x01149D31u; } // K
-        case 12: { return 0x01F08421u; } // L
-        case 13: { return 0x0118D771u; } // M
-        case 14: { return 0x011CD671u; } // N
-        case 15: { return 0x00E8C62Eu; } // O
-        case 16: { return 0x0010BE2Fu; } // P
-        case 17: { return 0x01ECC62Eu; } // Q
-        case 18: { return 0x0114BE2Fu; } // R
-        case 19: { return 0x00F8383Eu; } // S
-        case 20: { return 0x0042109Fu; } // T
-        case 21: { return 0x00E8C631u; } // U
-        case 22: { return 0x00454631u; } // V
-        case 23: { return 0x011DD631u; } // W
-        case 24: { return 0x01151151u; } // X
-        case 25: { return 0x00421151u; } // Y
-        case 26: { return 0x01F1111Fu; } // Z
-        case 27: { return 0x00020080u; } // :
-        default: { return 0u; }
-    }
-}
-
+// Geometric sans atlas: 16×3 cells of 32px. cell.y = 0 is the TOP of the glyph.
+// Built in hud_font.rs (upright). The old 5×5 pack was sampled with 1-y and looked inverted.
 fn letter(cell: vec2<f32>, ch: i32) -> f32 {
     if ch <= 0 { return 0.0; }
-    let p = vec2<i32>(i32(floor(cell.x * 5.0)), i32(floor((1.0 - cell.y) * 5.0)));
-    if p.x < 0 || p.x > 4 || p.y < 0 || p.y > 4 { return 0.0; }
-    let bits = letter_bits(ch);
-    let bit = u32(p.y * 5 + p.x);
-    return f32((bits >> bit) & 1u);
+    if cell.x < 0.0 || cell.x > 1.0 || cell.y < 0.0 || cell.y > 1.0 {
+        return 0.0;
+    }
+    let col = ch % 16;
+    let row = ch / 16;
+    let uv = (vec2<f32>(f32(col), f32(row)) + cell) / vec2<f32>(16.0, 3.0);
+    return textureSampleLevel(font_tex, font_samp, uv, 0.0).r;
 }
 
 // Short English names for the left HUD. -1 terminates a string of at most 8 glyphs.
@@ -255,7 +227,7 @@ fn label_char(id: i32, slot: i32) -> i32 {
 
 fn draw_label(uv: vec2<f32>, origin: vec2<f32>, id: i32) -> f32 {
     let n = 8.0;
-    let local = (uv - origin) / vec2<f32>(0.0075 * n, 0.014);
+    let local = (uv - origin) / vec2<f32>(0.0112 * n, 0.022);
     if local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0 {
         return 0.0;
     }
@@ -273,13 +245,6 @@ fn thin_frame(uv: vec2<f32>, r0: vec2<f32>, r1: vec2<f32>) -> f32 {
     return select(0.0, 1.0, inside && !inner);
 }
 
-fn elbow(uv: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
-    let p = px();
-    let h = abs(uv.y - a.y) <= p.y && uv.x >= min(a.x, b.x) && uv.x <= max(a.x, b.x);
-    let v = abs(uv.x - b.x) <= p.x && uv.y >= min(a.y, b.y) && uv.y <= max(a.y, b.y);
-    return select(0.0, 1.0, h || v);
-}
-
 fn row_alpha(cursor: vec2<f32>, y0: f32, y1: f32, density: f32, fade: f32, picked: bool) -> f32 {
     if density < 0.5 || fade <= 0.0 {
         return 0.0;
@@ -292,8 +257,8 @@ fn row_alpha(cursor: vec2<f32>, y0: f32, y1: f32, density: f32, fade: f32, picke
     if in_panel {
         hover = 1.0 - smoothstep(half, half + 0.028, dy);
     }
-    let base = select(0.0, 0.32, density > 1.5);
-    let focus = select(base, max(base, 0.82), picked);
+    let base = select(0.0, 0.96, density > 1.5);
+    let focus = select(base, max(base, 0.96), picked);
     return clamp(max(focus, hover), 0.0, 1.0) * fade;
 }
 
@@ -301,20 +266,23 @@ fn paint_label(uv: vec2<f32>, origin: vec2<f32>, id: i32, alpha: f32, rgb: vec3<
     if alpha <= 0.004 {
         return rgb;
     }
-    let shadow = draw_label(uv, origin + px() * 2.0, id);
+    let shadow = draw_label(uv, origin + px() * 1.5, id);
     let ink = draw_label(uv, origin, id);
     var out = rgb;
-    out = mix(out, vec3<f32>(0.0, 0.0, 0.0), shadow * alpha * 0.55);
-    out = mix(out, vec3<f32>(0.94, 0.95, 0.92), ink * alpha);
+    out = mix(out, vec3<f32>(0.0, 0.0, 0.0), shadow * alpha * 0.45);
+    out = mix(out, vec3<f32>(1.0, 1.0, 1.0), ink * alpha);
     return out;
 }
 
-fn paint_callout(uv: vec2<f32>, src: vec2<f32>, dst: vec2<f32>, alpha: f32, rgb: vec3<f32>) -> vec3<f32> {
-    if alpha < 0.55 {
-        return rgb;
+fn swatch(uv: vec2<f32>, origin: vec2<f32>, fill: f32, tint: vec3<f32>) -> vec3<f32> {
+    let local = (uv - origin) / vec2<f32>(0.015, 0.018);
+    if local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0 {
+        return vec3<f32>(0.0);
     }
-    let line = elbow(uv, src, dst);
-    return mix(rgb, vec3<f32>(0.86, 0.88, 0.84), line * (alpha - 0.55) * 0.9);
+    let p = px();
+    let edge = local.x < p.x / 0.015 || local.x > 1.0 - p.x / 0.015 || local.y < p.y / 0.018 || local.y > 1.0 - p.y / 0.018;
+    let body = mix(tint * 0.18, tint, clamp(fill, 0.22, 1.0));
+    return select(body, vec3<f32>(0.92, 0.93, 0.90), edge);
 }
 
 @fragment
@@ -464,9 +432,9 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         }
     }
 
-    // Telemetry panel. 3×5 glyphs stay; English is a fade-in overlay.
-    // Row map: docs/HUD_LEGEND.md
-    if uv.x < 0.24 {
+    // Telemetry panel. Readable white captions + color readout boxes.
+    // Optional small 3×5 digits sit to the right. Row map: docs/HUD_LEGEND.md
+    if uv.x < 0.26 {
         rgb = mix(rgb, vec3<f32>(0.03, 0.035, 0.04), 0.78);
         var ink = 0.0;
         let live = f32(hud[0]);
@@ -485,98 +453,114 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             age = tip.age;
             reserve = tip.reserve;
         }
-        ink = ink + draw_number(uv, vec2<f32>(0.018, 0.06), u.fps, 3);
-        ink = ink + draw_number(uv, vec2<f32>(0.018, 0.12), live, 6);
-        ink = ink + draw_number(uv, vec2<f32>(0.018, 0.16), fusions, 5);
-        ink = ink + draw_number(uv, vec2<f32>(0.018, 0.20), branches, 5);
-        ink = ink + draw_number(uv, vec2<f32>(0.018, 0.24), cn, 4);
-        ink = ink + draw_number(uv, vec2<f32>(0.018, 0.70), f32(sid), 6);
-        ink = ink + draw_number(uv, vec2<f32>(0.018, 0.74), lineage, 3);
-        ink = ink + draw_number(uv, vec2<f32>(0.018, 0.78), age, 5);
-        ink = ink + draw_number(uv, vec2<f32>(0.018, 0.82), reserve * 100.0, 4);
-        ink = ink + draw_number(uv, vec2<f32>(0.018, 0.56), u.slice_z, 4);
-        ink = ink + draw_number(uv, vec2<f32>(0.018, 0.60), u.slice_thickness, 3);
-        ink = ink + draw_number(uv, vec2<f32>(0.018, 0.64), u.slice_zoom * 100.0, 3);
-        ink = ink + draw_number(uv, vec2<f32>(0.018, 0.90), u.param_slot, 1);
-        ink = ink + draw_number(uv, vec2<f32>(0.050, 0.90), u.param_value * 100.0, 4);
-        rgb = rgb + vec3<f32>(0.82, 0.88, 0.80) * ink;
-        rgb = rgb + bar(uv, vec2<f32>(0.03, 0.32), f32(hud[4]) / 80000.0, vec3<f32>(0.55, 0.92, 0.82));
-        rgb = rgb + bar(uv, vec2<f32>(0.03, 0.36), f32(hud[5]) / 40000.0, vec3<f32>(0.95, 0.72, 0.28));
-        rgb = rgb + bar(uv, vec2<f32>(0.03, 0.40), f32(hud[6]) / 40000.0, vec3<f32>(0.78, 0.42, 0.10));
-        rgb = rgb + bar(uv, vec2<f32>(0.03, 0.44), f32(hud[7]) / 25000.0, vec3<f32>(0.55, 0.40, 0.85));
-        rgb = rgb + bar(uv, vec2<f32>(0.03, 0.48), f32(hud[8]) / 20000.0, vec3<f32>(0.32, 0.70, 0.34));
-        rgb = rgb + bar(uv, vec2<f32>(0.03, 0.52), f32(hud[9]) / 50000.0, vec3<f32>(0.45, 0.32, 0.18));
+        let hypha_f = clamp(f32(hud[4]) / 80000.0, 0.0, 1.0);
+        let cord_f = clamp(f32(hud[5]) / 40000.0, 0.0, 1.0);
+        let solc_f = clamp(f32(hud[6]) / 40000.0, 0.0, 1.0);
+        let soln_f = clamp(f32(hud[7]) / 25000.0, 0.0, 1.0);
+        let enz_f = clamp(f32(hud[8]) / 20000.0, 0.0, 1.0);
+        let org_f = clamp(f32(hud[9]) / 50000.0, 0.0, 1.0);
+        let teal = vec3<f32>(0.55, 0.92, 0.82);
+        let amber = vec3<f32>(0.95, 0.72, 0.28);
+        let rust = vec3<f32>(0.78, 0.42, 0.10);
+        let violet = vec3<f32>(0.55, 0.40, 0.85);
+        let green = vec3<f32>(0.32, 0.70, 0.34);
+        let brown = vec3<f32>(0.45, 0.32, 0.18);
+        let ice = vec3<f32>(0.78, 0.84, 0.88);
+        let gold = vec3<f32>(0.90, 0.78, 0.40);
+        let warm = vec3<f32>(0.92, 0.62, 0.28);
+
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.058), u.fps, 3);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.100), live, 6);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.142), fusions, 5);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.184), branches, 5);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.226), cn, 4);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.558), u.slice_z, 4);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.600), u.slice_thickness, 3);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.642), u.slice_zoom * 100.0, 3);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.700), f32(sid), 6);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.742), lineage, 3);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.784), age, 5);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.826), reserve * 100.0, 4);
+        ink = ink + draw_number(uv, vec2<f32>(0.168, 0.896), u.param_slot, 1);
+        ink = ink + draw_number(uv, vec2<f32>(0.188, 0.896), u.param_value * 100.0, 4);
+        rgb = rgb + vec3<f32>(0.70, 0.76, 0.72) * ink * 0.85;
+        rgb = rgb + bar(uv, vec2<f32>(0.128, 0.312), hypha_f, teal);
+        rgb = rgb + bar(uv, vec2<f32>(0.128, 0.354), cord_f, amber);
+        rgb = rgb + bar(uv, vec2<f32>(0.128, 0.396), solc_f, rust);
+        rgb = rgb + bar(uv, vec2<f32>(0.128, 0.438), soln_f, violet);
+        rgb = rgb + bar(uv, vec2<f32>(0.128, 0.480), enz_f, green);
+        rgb = rgb + bar(uv, vec2<f32>(0.128, 0.522), org_f, brown);
+
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.058), 0.85, ice);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.100), clamp(live / 400000.0, 0.2, 1.0), teal);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.142), clamp(fusions / 8000.0, 0.2, 1.0), amber);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.184), clamp(branches / 8000.0, 0.2, 1.0), green);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.226), clamp(cn / 12.0, 0.2, 1.0), rust);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.318), hypha_f, teal);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.360), cord_f, amber);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.402), solc_f, rust);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.444), soln_f, violet);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.486), enz_f, green);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.528), org_f, brown);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.558), 0.7, warm);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.600), 0.55, warm);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.642), 0.4, warm);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.700), select(0.25, 0.9, sid < 20000000u), teal);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.742), select(0.25, 0.75, sid < 20000000u), gold);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.784), select(0.25, 0.6, sid < 20000000u), ice);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.826), select(0.25, clamp(reserve, 0.25, 1.0), sid < 20000000u), amber);
+        rgb = rgb + swatch(uv, vec2<f32>(0.012, 0.896), 0.7, ice);
 
         let cursor = u.hud_ui.xy;
         let density = u.hud_ui.z;
         let fade = clamp(u.hud_ui.w, 0.0, 1.0);
         let picked = sid < 20000000u && u.selected_id > 0.0;
-        let chrome = row_alpha(cursor, 0.04, 0.96, density, fade, false) * 0.55;
-        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.048), vec2<f32>(0.232, 0.288)) * chrome);
-        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.300), vec2<f32>(0.232, 0.548)) * chrome);
-        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.548), vec2<f32>(0.232, 0.682)) * chrome);
-        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.688), vec2<f32>(0.232, 0.862)) * chrome);
-        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.878), vec2<f32>(0.232, 0.938)) * chrome);
+        let chrome = row_alpha(cursor, 0.04, 0.96, density, fade, false) * 0.45;
+        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.048), vec2<f32>(0.250, 0.258)) * chrome);
+        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.300), vec2<f32>(0.250, 0.548)) * chrome);
+        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.548), vec2<f32>(0.250, 0.682)) * chrome);
+        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.688), vec2<f32>(0.250, 0.862)) * chrome);
+        rgb = mix(rgb, vec3<f32>(0.72, 0.74, 0.70), thin_frame(uv, vec2<f32>(0.008, 0.878), vec2<f32>(0.250, 0.938)) * chrome);
 
-        let a0 = row_alpha(cursor, 0.050, 0.100, density, fade, false);
-        let a1 = row_alpha(cursor, 0.105, 0.150, density, fade, false);
-        let a2 = row_alpha(cursor, 0.150, 0.185, density, fade, false);
-        let a3 = row_alpha(cursor, 0.185, 0.225, density, fade, false);
-        let a4 = row_alpha(cursor, 0.225, 0.280, density, fade, false);
-        let a5 = row_alpha(cursor, 0.305, 0.345, density, fade, false);
-        let a6 = row_alpha(cursor, 0.345, 0.385, density, fade, false);
-        let a7 = row_alpha(cursor, 0.385, 0.425, density, fade, false);
-        let a8 = row_alpha(cursor, 0.425, 0.465, density, fade, false);
-        let a9 = row_alpha(cursor, 0.465, 0.505, density, fade, false);
-        let a10 = row_alpha(cursor, 0.505, 0.545, density, fade, false);
-        let a11 = row_alpha(cursor, 0.545, 0.585, density, fade, false);
-        let a12 = row_alpha(cursor, 0.585, 0.625, density, fade, false);
-        let a13 = row_alpha(cursor, 0.625, 0.675, density, fade, false);
-        let a14 = row_alpha(cursor, 0.675, 0.725, density, fade, picked);
-        let a15 = row_alpha(cursor, 0.725, 0.765, density, fade, picked);
-        let a16 = row_alpha(cursor, 0.765, 0.805, density, fade, picked);
-        let a17 = row_alpha(cursor, 0.805, 0.855, density, fade, picked);
-        let a18 = row_alpha(cursor, 0.855, 0.940, density, fade, false);
+        let a0 = row_alpha(cursor, 0.050, 0.095, density, fade, false);
+        let a1 = row_alpha(cursor, 0.095, 0.137, density, fade, false);
+        let a2 = row_alpha(cursor, 0.137, 0.179, density, fade, false);
+        let a3 = row_alpha(cursor, 0.179, 0.221, density, fade, false);
+        let a4 = row_alpha(cursor, 0.221, 0.268, density, fade, false);
+        let a5 = row_alpha(cursor, 0.305, 0.350, density, fade, false);
+        let a6 = row_alpha(cursor, 0.350, 0.392, density, fade, false);
+        let a7 = row_alpha(cursor, 0.392, 0.434, density, fade, false);
+        let a8 = row_alpha(cursor, 0.434, 0.476, density, fade, false);
+        let a9 = row_alpha(cursor, 0.476, 0.518, density, fade, false);
+        let a10 = row_alpha(cursor, 0.518, 0.555, density, fade, false);
+        let a11 = row_alpha(cursor, 0.548, 0.592, density, fade, false);
+        let a12 = row_alpha(cursor, 0.592, 0.634, density, fade, false);
+        let a13 = row_alpha(cursor, 0.634, 0.682, density, fade, false);
+        let a14 = row_alpha(cursor, 0.688, 0.734, density, fade, picked);
+        let a15 = row_alpha(cursor, 0.734, 0.776, density, fade, picked);
+        let a16 = row_alpha(cursor, 0.776, 0.818, density, fade, picked);
+        let a17 = row_alpha(cursor, 0.818, 0.862, density, fade, picked);
+        let a18 = row_alpha(cursor, 0.878, 0.940, density, fade, false);
 
-        rgb = paint_label(uv, vec2<f32>(0.068, 0.067), 0, a0, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.112, 0.127), 1, a1, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.098, 0.167), 2, a2, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.098, 0.207), 3, a3, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.084, 0.247), 4, a4, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.032, 0.304), 5, a5, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.032, 0.344), 6, a6, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.032, 0.384), 7, a7, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.032, 0.424), 8, a8, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.032, 0.464), 9, a9, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.032, 0.504), 10, a10, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.084, 0.567), 11, a11, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.070, 0.607), 12, a12, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.070, 0.647), 13, a13, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.112, 0.707), 14, a14, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.070, 0.747), 15, a15, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.098, 0.787), 16, a16, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.084, 0.827), 17, a17, rgb);
-        rgb = paint_label(uv, vec2<f32>(0.118, 0.907), 18, a18, rgb);
-
-        rgb = paint_callout(uv, vec2<f32>(0.062, 0.074), vec2<f32>(0.066, 0.074), a0, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.104, 0.134), vec2<f32>(0.110, 0.134), a1, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.090, 0.174), vec2<f32>(0.096, 0.174), a2, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.090, 0.214), vec2<f32>(0.096, 0.214), a3, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.076, 0.254), vec2<f32>(0.082, 0.254), a4, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.028, 0.328), vec2<f32>(0.028, 0.311), a5, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.028, 0.368), vec2<f32>(0.028, 0.351), a6, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.028, 0.408), vec2<f32>(0.028, 0.391), a7, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.028, 0.448), vec2<f32>(0.028, 0.431), a8, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.028, 0.488), vec2<f32>(0.028, 0.471), a9, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.028, 0.528), vec2<f32>(0.028, 0.511), a10, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.076, 0.574), vec2<f32>(0.082, 0.574), a11, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.062, 0.614), vec2<f32>(0.068, 0.614), a12, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.062, 0.654), vec2<f32>(0.068, 0.654), a13, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.104, 0.714), vec2<f32>(0.110, 0.714), a14, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.062, 0.754), vec2<f32>(0.068, 0.754), a15, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.090, 0.794), vec2<f32>(0.096, 0.794), a16, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.076, 0.834), vec2<f32>(0.082, 0.834), a17, rgb);
-        rgb = paint_callout(uv, vec2<f32>(0.108, 0.914), vec2<f32>(0.116, 0.914), a18, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.054), 0, a0, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.096), 1, a1, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.138), 2, a2, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.180), 3, a3, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.222), 4, a4, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.308), 5, a5, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.350), 6, a6, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.392), 7, a7, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.434), 8, a8, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.476), 9, a9, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.518), 10, a10, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.554), 11, a11, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.596), 12, a12, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.638), 13, a13, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.696), 14, a14, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.738), 15, a15, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.780), 16, a16, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.822), 17, a17, rgb);
+        rgb = paint_label(uv, vec2<f32>(0.032, 0.892), 18, a18, rgb);
     }
 
     return vec4<f32>(rgb, 1.0);

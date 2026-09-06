@@ -2,6 +2,7 @@ mod config;
 mod cutter;
 mod export;
 mod gpu;
+mod hud_font;
 mod memory;
 mod model;
 mod types;
@@ -243,7 +244,7 @@ impl ApplicationHandler<AppAction> for App {
                 println!("[ ] depth | ; ' thickness | , . XY field | arrows pan slab | Shift = coarse");
                 println!("Space pause | R reseed | F litter | D drift | Esc quit");
                 println!(
-                    "Tab HUD labels ({}) | hover a meter to fade English | glyphs stay",
+                    "Tab HUD labels ({}) | white names + color boxes | hover in sparse",
                     self.runtime.as_ref().map(|r| r.labels.as_str()).unwrap_or("rich")
                 );
                 println!(

@@ -23,7 +23,7 @@ python pycelium.py
 
 ### GPU mesocosm (`pycelium-win`)
 
-Windows / wgpu 3D pedon. Left telemetry HUD keeps the cryptic **3×5 bitmap digits** and fades in short English names (rich density by default; **Tab** cycles rich / sparse / off). Legend: [docs/HUD_LEGEND.md](docs/HUD_LEGEND.md). Face-aligned **slice export** (`E` capture, `Enter` write PNG/JSON/SVG): [docs/SLICE_EXPORT.md](docs/SLICE_EXPORT.md).
+Windows / wgpu 3D pedon. Left telemetry HUD uses **white sans-serif English** plus a color readout box per row (rich by default; **Tab** cycles rich / sparse / off). Small 3×5 digits stay on the right. Legend: [docs/HUD_LEGEND.md](docs/HUD_LEGEND.md). Face-aligned **slice export** (`E` capture, `Enter` write PNG/JSON/SVG): [docs/SLICE_EXPORT.md](docs/SLICE_EXPORT.md).
 
 ```bash
 cargo run -p pycelium-win --release -- --preset demo

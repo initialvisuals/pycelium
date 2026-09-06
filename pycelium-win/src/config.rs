@@ -64,15 +64,15 @@ pub struct Args {
 }
 
 /// How loudly the left telemetry HUD speaks English.
-/// Cryptic 3×5 glyphs stay visible in every mode.
+/// Color readout boxes stay visible in every mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub enum LabelDensity {
-    /// All meter names at low opacity; hover / pick fades them up.
+    /// White sans-serif names at full opacity.
     #[default]
     Rich,
     /// Names only on hover, pick, or the focused param row.
     Sparse,
-    /// Glyphs and bars only.
+    /// Color boxes, bars, and small 3×5 digits only — no English.
     Off,
 }
 

@@ -3,6 +3,7 @@ use wgpu::util::DeviceExt;
 
 use crate::config::MemoryPlan;
 use crate::export::VolumeFields;
+use crate::hud_font;
 use crate::memory::HostWorld;
 use crate::types::{PresentUniforms, SimUniforms, SliceView, TEL_COUNT, Tip};
 
@@ -92,6 +93,10 @@ pub struct MyceliumGpu {
     sim_bg: wgpu::BindGroup,
     present_pipeline: wgpu::RenderPipeline,
     present_bg: wgpu::BindGroup,
+    #[allow(dead_code)]
+    font_tex: wgpu::Texture,
+    #[allow(dead_code)]
+    font_samp: wgpu::Sampler,
     tick: u32,
     last_pick: u32,
 }
@@ -186,7 +191,51 @@ impl MyceliumGpu {
                 storage_entry(5, wgpu::ShaderStages::FRAGMENT, true),
                 storage_entry(6, wgpu::ShaderStages::FRAGMENT, true),
                 storage_entry(7, wgpu::ShaderStages::FRAGMENT, true),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
+        });
+
+        let atlas = hud_font::rasterize_atlas();
+        let font_tex = device.create_texture_with_data(
+            queue,
+            &wgpu::TextureDescriptor {
+                label: Some("hud-font"),
+                size: wgpu::Extent3d {
+                    width: atlas.width,
+                    height: atlas.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::LayerMajor,
+            &atlas.pixels,
+        );
+        let font_view = font_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let font_samp = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("hud-font-samp"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
         });
 
         let sim_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -272,6 +321,14 @@ impl MyceliumGpu {
                 bind(&organic, 5),
                 bind(&tel, 6),
                 bind(&tip_buf, 7),
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::TextureView(&font_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::Sampler(&font_samp),
+                },
             ],
         });
 
@@ -308,6 +365,8 @@ impl MyceliumGpu {
             sim_bg,
             present_pipeline,
             present_bg,
+            font_tex,
+            font_samp,
             tick: 0,
             last_pick: 0,
         })

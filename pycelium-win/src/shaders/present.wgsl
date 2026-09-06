@@ -41,6 +41,7 @@ struct PresentUniforms {
     slice_ox: f32,
     slice_oy: f32,
     hud_ui: vec4<f32>,
+    cutter: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> u: PresentUniforms;
@@ -350,11 +351,36 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             col = col + vec3<f32>(0.72, 0.38, 0.08) * food * 0.45;
             col = col + vec3<f32>(0.28, 0.62, 0.30) * enz * 0.25;
             col = col + vec3<f32>(0.12, 0.08, 0.05) * (1.0 - exp(-org * 1.4)) * 0.2;
-            let dens = hypha * 0.55 + cord * 0.2 + food * 0.08 + 0.015;
+            var dens = hypha * 0.55 + cord * 0.2 + food * 0.08 + 0.015;
             let z_vox = p.z * f32(u.depth);
             let slab = abs(z_vox - u.slice_z) <= max(u.slice_thickness * 0.5, 0.5);
             if slab {
                 col = col + vec3<f32>(0.35, 0.28, 0.08);
+            }
+            let capture = u.cutter.w;
+            if capture >= 0.5 {
+                let vol = vec3<f32>(f32(u.width), f32(u.height), f32(u.depth));
+                let pv = p * vol;
+                let ax = i32(u.cutter.x + 0.5);
+                var coord = pv.z;
+                var asz = vol.z;
+                if ax == 0 {
+                    coord = pv.x;
+                    asz = vol.x;
+                } else if ax == 1 {
+                    coord = pv.y;
+                    asz = vol.y;
+                }
+                let center = u.cutter.y * asz;
+                let half = max(u.cutter.z, 0.5);
+                let dist = abs(coord - center);
+                if dist <= half {
+                    let face = abs(dist - half) < 0.65;
+                    let glow = select(0.28, 0.95, face);
+                    let snap = select(0.0, 0.18, fract(capture) > 0.25);
+                    col = col + vec3<f32>(1.0, 0.48, 0.08) * (glow + snap);
+                    dens = dens + select(0.03, 0.07, face);
+                }
             }
             acc = acc + (1.0 - alpha) * col * dens;
             alpha = alpha + (1.0 - alpha) * dens;
@@ -389,6 +415,53 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         srgb = srgb + vec3<f32>(0.7, 0.36, 0.08) * food;
         let frame = step(min(min(iu, iv), min(1.0 - iu, 1.0 - iv)), 0.02);
         rgb = mix(srgb, vec3<f32>(0.8, 0.8, 0.75), frame);
+    }
+
+    // Capture cutter: snapped cube-face wash + two-ended thickness slider.
+    if u.cutter.w >= 0.5 {
+        if hit.y > hit.x && hit.y > 0.0 && fract(u.cutter.w) > 0.25 {
+            let p0 = eye + rd * max(hit.x, 0.0);
+            let ax = i32(u.cutter.x + 0.5);
+            var face_d = min(p0.z, 1.0 - p0.z);
+            if ax == 0 { face_d = min(p0.x, 1.0 - p0.x); }
+            else if ax == 1 { face_d = min(p0.y, 1.0 - p0.y); }
+            if face_d < 0.014 {
+                rgb = mix(rgb, vec3<f32>(1.0, 0.50, 0.10), 0.22);
+            }
+        }
+        let sx0 = 0.30;
+        let sx1 = 0.70;
+        let sy0 = 0.900;
+        let sy1 = 0.958;
+        if uv.x >= sx0 - 0.012 && uv.x <= sx1 + 0.012 && uv.y >= sy0 && uv.y <= sy1 {
+            let t = clamp((uv.x - sx0) / (sx1 - sx0), 0.0, 1.0);
+            let pos = u.cutter.y;
+            var asz = f32(u.depth);
+            let ax = i32(u.cutter.x + 0.5);
+            if ax == 0 { asz = f32(u.width); }
+            else if ax == 1 { asz = f32(u.height); }
+            let hn = clamp(u.cutter.z / max(asz, 1.0), 0.0, 0.5);
+            let lo = pos - hn;
+            let hi = pos + hn;
+            var srgb = vec3<f32>(0.07, 0.07, 0.08);
+            if t >= lo && t <= hi {
+                srgb = vec3<f32>(0.85, 0.42, 0.08);
+            }
+            let track = abs(uv.y - 0.5 * (sy0 + sy1)) < 0.003;
+            if track {
+                srgb = vec3<f32>(0.35, 0.32, 0.28);
+            }
+            let handle = (abs(t - lo) < 0.012 || abs(t - hi) < 0.012) && abs(uv.y - 0.5 * (sy0 + sy1)) < 0.018;
+            if handle {
+                srgb = vec3<f32>(1.0, 0.62, 0.18);
+            }
+            let mid = abs(t - pos) < 0.004;
+            if mid {
+                srgb = vec3<f32>(0.95, 0.90, 0.70);
+            }
+            let frame = step(min(min((uv.x - (sx0 - 0.008)), (sx1 + 0.008) - uv.x), min(uv.y - sy0, sy1 - uv.y)), 0.002);
+            rgb = mix(srgb, vec3<f32>(0.80, 0.78, 0.70), frame);
+        }
     }
 
     // Telemetry panel. 3×5 glyphs stay; English is a fade-in overlay.

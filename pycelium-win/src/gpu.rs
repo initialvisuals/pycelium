@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use wgpu::util::DeviceExt;
 
 use crate::config::MemoryPlan;
+use crate::export::VolumeFields;
 use crate::memory::HostWorld;
 use crate::types::{PresentUniforms, SimUniforms, SliceView, TEL_COUNT, Tip};
 
@@ -134,7 +135,9 @@ impl MyceliumGpu {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(name),
                 contents: bytemuck::cast_slice(data),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
             })
         };
         let zeros = vec![0f32; cells as usize];
@@ -391,6 +394,7 @@ impl MyceliumGpu {
         label_density: f32,
         label_fade: f32,
         has_picked: bool,
+        cutter: [f32; 4],
     ) {
         let present = PresentUniforms {
             width: self.width,
@@ -424,6 +428,7 @@ impl MyceliumGpu {
             slice_ox: self.slice.ox,
             slice_oy: self.slice.oy,
             hud_ui: [cursor[0], cursor[1], label_density, label_fade],
+            cutter,
         };
         queue.write_buffer(&self.present_buf, 0, bytemuck::bytes_of(&present));
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -456,6 +461,25 @@ impl MyceliumGpu {
             pass.draw(0..3, 0..1);
         }
         queue.submit(Some(encoder.finish()));
+    }
+
+    /// Copy biomass + soluble C back to the host for a slice bake.
+    pub fn read_volume_fields(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<VolumeFields> {
+        let cells = (self.width * self.height * self.depth) as u64;
+        let bytes = cells * 4;
+        let biomass = read_f32_buffer(device, queue, &self.biomass, bytes)?;
+        let soluble_c = read_f32_buffer(device, queue, &self.soluble_c, bytes)?;
+        Ok(VolumeFields {
+            width: self.width,
+            height: self.height,
+            depth: self.depth,
+            biomass,
+            soluble_c,
+        })
     }
 
     fn clear_telemetry(&self, queue: &wgpu::Queue) {
@@ -555,6 +579,39 @@ mod shader_tests {
             .validate(&module)
             .expect("present.wgsl should validate");
     }
+}
+
+fn read_f32_buffer(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    src: &wgpu::Buffer,
+    bytes: u64,
+) -> Result<Vec<f32>> {
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("slice-readback"),
+        size: bytes,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("slice-readback"),
+    });
+    encoder.copy_buffer_to_buffer(src, 0, &staging, 0, bytes);
+    queue.submit(Some(encoder.finish()));
+    let slice = staging.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = tx.send(result);
+    });
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .context("poll slice readback")?;
+    rx.recv().context("readback callback")??;
+    let data = slice.get_mapped_range();
+    let floats = bytemuck::cast_slice(&data).to_vec();
+    drop(data);
+    staging.unmap();
+    Ok(floats)
 }
 
 fn bind(buffer: &wgpu::Buffer, binding: u32) -> wgpu::BindGroupEntry<'_> {

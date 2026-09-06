@@ -23,11 +23,12 @@ python pycelium.py
 
 ### GPU mesocosm (`pycelium-win`)
 
-Windows / wgpu 3D pedon. Left telemetry HUD keeps the cryptic **3×5 bitmap digits** and fades in short English names (rich density by default; **Tab** cycles rich / sparse / off). Legend: [docs/HUD_LEGEND.md](docs/HUD_LEGEND.md).
+Windows / wgpu 3D pedon. Left telemetry HUD keeps the cryptic **3×5 bitmap digits** and fades in short English names (rich density by default; **Tab** cycles rich / sparse / off). Legend: [docs/HUD_LEGEND.md](docs/HUD_LEGEND.md). Face-aligned **slice export** (`E` capture, `Enter` write PNG/JSON/SVG): [docs/SLICE_EXPORT.md](docs/SLICE_EXPORT.md).
 
 ```bash
 cargo run -p pycelium-win --release -- --preset demo
 # Tab: label density    hover a meter to focus    --labels sparse|off
+# E: capture slice    C: 2D/rich    hover a cube face to snap    Enter: export
 # --bench N is headless and does not open the HUD
 ```
 
@@ -45,6 +46,7 @@ labeled **EXAMPLE** and are not measurements.
 | `pycelium.py` | CLI toy |
 | `pycelium-win/` | GPU mesocosm + telemetry HUD |
 | `docs/HUD_LEGEND.md` | Left HUD map (glyphs + English) |
+| `docs/SLICE_EXPORT.md` | Capture cutter + export formats |
 | `docs/EXPERIMENT_LOG.md` | How to record a logged trial |
 | `docs/experiments/` | CSV / JSONL schema + EXAMPLE rows |
 | `README.rst` | Original short readme |

@@ -67,6 +67,9 @@ docs/_build/
 target/
 *.pdb
 
+# Mesocosm slice captures
+exports/
+
 # IPython Notebook
 .ipynb_checkpoints
 

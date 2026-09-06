@@ -68,6 +68,8 @@ After a pick, sparse mode keeps this block readable.
 
 Slots: chemotropism, nitrotropism, autotropism, persistence, maintenance, enzyme_k, branch_cost, extension. Keys `1–8` select, `-` / `=` nudge.
 
+Slice **export** (face-aligned 2D squash / rich box) is a separate capture mode (`E`). It does not change these HUD rows. See [SLICE_EXPORT.md](SLICE_EXPORT.md).
+
 ## Inset (right)
 
 The orthogonal slab inset is **not** part of the left HUD. It shows hypha + soluble C in the current Z slab, framed, with zoom/pan.

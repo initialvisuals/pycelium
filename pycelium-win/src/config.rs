@@ -57,6 +57,10 @@ pub struct Args {
     /// English HUD label density. Tab cycles rich → sparse → off at runtime.
     #[arg(long, value_enum, default_value_t = LabelDensity::Rich)]
     pub labels: LabelDensity,
+
+    /// Directory for slice-export files (created on first capture).
+    #[arg(long, default_value = "exports")]
+    pub export_dir: String,
 }
 
 /// How loudly the left telemetry HUD speaks English.
@@ -231,6 +235,7 @@ mod tests {
             drift: false,
             bench: None,
             labels: LabelDensity::Rich,
+            export_dir: "exports".into(),
         };
         let plan = MemoryPlan::from_args(&args);
         assert!(plan.estimated_host_bytes > 1024 * 1024);
@@ -251,6 +256,19 @@ mod tests {
         assert_eq!(off.labels, LabelDensity::Off);
         assert_eq!(def.labels, LabelDensity::Rich);
         assert!(matches!(def.preset, Preset::Performant));
+        assert_eq!(def.export_dir, "exports");
+    }
+
+    #[test]
+    fn export_dir_flag_does_not_change_plan() {
+        let custom =
+            Args::try_parse_from(["pycelium-win", "--export-dir", "out/slices"]).expect("parse");
+        let def = Args::try_parse_from(["pycelium-win"]).expect("parse");
+        let a = MemoryPlan::from_args(&custom);
+        let b = MemoryPlan::from_args(&def);
+        assert_eq!(a.gpu_width, b.gpu_width);
+        assert_eq!(a.gpu_agents, b.gpu_agents);
+        assert_eq!(custom.export_dir, "out/slices");
     }
 
     #[test]
@@ -273,6 +291,7 @@ mod tests {
             drift: false,
             bench: None,
             labels: LabelDensity::Off,
+            export_dir: "exports".into(),
         };
         let plan = MemoryPlan::from_args(&beast);
         assert!(plan.gpu_agents >= 1_000);

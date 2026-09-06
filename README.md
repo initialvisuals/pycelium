@@ -31,6 +31,13 @@ cargo run -p pycelium-win --release -- --preset demo
 # --bench N is headless and does not open the HUD
 ```
 
+### Experiment log
+
+Logged trials (presets, `--drift` / `--bench`, HUD bake metrics) live in
+[`docs/EXPERIMENT_LOG.md`](docs/EXPERIMENT_LOG.md). Append runs to
+[`docs/experiments/runs.csv`](docs/experiments/runs.csv). Example rows are
+labeled **EXAMPLE** and are not measurements.
+
 ### Files
 
 | Path | What |
@@ -38,6 +45,8 @@ cargo run -p pycelium-win --release -- --preset demo
 | `pycelium.py` | CLI toy |
 | `pycelium-win/` | GPU mesocosm + telemetry HUD |
 | `docs/HUD_LEGEND.md` | Left HUD map (glyphs + English) |
+| `docs/EXPERIMENT_LOG.md` | How to record a logged trial |
+| `docs/experiments/` | CSV / JSONL schema + EXAMPLE rows |
 | `README.rst` | Original short readme |
 | `LICENSE` | License |
 

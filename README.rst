@@ -40,12 +40,21 @@ Layers
 
 Inoculum is a handful of germ tubes. Time fills the volume.
 
+Experiment log
+--------------
+
+How to record a logged trial (presets, ``--drift`` / ``--bench``, HUD
+bake metrics): ``docs/EXPERIMENT_LOG.md``. Append runs to
+``docs/experiments/runs.csv``. Rows marked EXAMPLE are format samples,
+not measurements.
+
 HUD
 ---
 
 Left panel: FPS, live tips, fusions, branches, C:N, bars for biomass / cord C /
 soluble C / N / enzyme / organic, plus the clicked tip (id, lineage, age,
-reserve) and the active parameter.
+reserve) and the active parameter. English names fade in beside the 3×5
+glyphs (Tab cycles rich / sparse / off). Legend: ``docs/HUD_LEGEND.md``.
 
 Inset: orthogonal slice (the plate photograph).
 

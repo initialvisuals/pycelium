@@ -23,12 +23,12 @@ python pycelium.py
 
 ### GPU mesocosm (`pycelium-win`)
 
-Windows / wgpu 3D pedon. Left telemetry HUD uses **white sans-serif English** plus a color readout box per row (rich by default; **Tab** cycles rich / sparse / off). Small 3×5 digits stay on the right. Legend: [docs/HUD_LEGEND.md](docs/HUD_LEGEND.md). Face-aligned **slice export** (`E` capture, `S` settings, `Enter` write PNG/JSON/SVG) defaults to a **512×512** power-of-two square (presets 8…8192): [docs/SLICE_EXPORT.md](docs/SLICE_EXPORT.md).
+Windows / wgpu 3D pedon. Left telemetry HUD uses **white sans-serif English** plus a color readout box per row (rich by default; **Tab** cycles rich / sparse / off). **H** toggles a corner control-scheme panel; hover a meter for a teach callout. Small 3×5 digits stay on the right. Legend: [docs/HUD_LEGEND.md](docs/HUD_LEGEND.md). Face-aligned **slice export** (`E` capture, `S` settings, `Enter` write PNG/JSON/SVG) defaults to a **512×512** power-of-two square (presets 8…8192): [docs/SLICE_EXPORT.md](docs/SLICE_EXPORT.md). Heightmap write is **M**.
 
 ```bash
 cargo run -p pycelium-win --release -- --preset demo
-# Tab: label density    hover a meter to focus    --labels sparse|off
-# E: capture slice    S: export size (8…8K square)    C: 2D/rich    Enter: export
+# Tab: label density    H: control scheme    hover a meter for a teach callout
+# E: capture slice    S: export size (8…8K square)    C: 2D/rich    M: heightmap    Enter: export
 # --bench N is headless and does not open the HUD
 ```
 

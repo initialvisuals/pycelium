@@ -13,6 +13,8 @@ The previous 5×5 captions were sampled with a Y flip against top-left bit packi
 - Thin 1-pixel frames around census / fields / slice / tip / param groups
 - Tight 1–2 pixel drop shadow on type (no blur)
 - Density dial: rich (default, full opacity), sparse (hover/pick only), off (boxes + bars + small digits)
+- **H** toggles a compact **control-scheme** panel (bottom-right; slides left of the export card when that card is open)
+- Hover a HUD row (or a scheme row) for a white elbow string and a teach popup near the cursor. Boxes and bars stay hit-testable when Tab density is `off`.
 
 ## Census (top)
 
@@ -71,6 +73,14 @@ After a pick, sparse mode keeps this block readable.
 Slots: chemotropism, nitrotropism, autotropism, persistence, maintenance, enzyme_k, branch_cost, extension. Keys `1–8` select, `-` / `=` nudge.
 
 Slice **export** (face-aligned 2D squash / rich box) is a separate capture mode (`E`). It does not change these HUD rows. The export settings card (`S`) lives on the **right**, under the slab inset. See [SLICE_EXPORT.md](SLICE_EXPORT.md).
+
+## Control scheme + hover teach
+
+**H** opens or hides the corner keybind panel (global, including during capture). Hover any left-HUD meter — FPS through PARAM — or a row on that panel for a verbose plain-English callout (sim meaning, plus terms such as anastomosis, chemotropism, soluble C/N, exoenzyme, cord). The popup sits near the mouse and is tied to the control with a thin white elbow / string (1–2 px shadow, no blur).
+
+Tab `off` still teaches if the cursor is on a color box or bar. If a future chrome piece has no hit box, teach cannot fire for it.
+
+Heightmap PNG write in capture is **M**, not H. **Y** still cycles the heightmap axis and turns that write on.
 
 ## Inset (right)
 

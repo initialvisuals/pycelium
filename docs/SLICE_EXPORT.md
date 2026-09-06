@@ -32,7 +32,7 @@ The world is the unit cube. Hover near a **face center** (halfway) and the cutte
 
 Hover a **face mid-edge** to rotate **90° on the free axis** (top-face left/right mid-edge → vertical X; top-face front/back mid-edge → vertical Y). The orange preview plane/box and a wash on the snapped faces show the alignment.
 
-`X` cycles axis by hand if snap misses. `Y` cycles the optional heightmap axis (and turns heightmap export on). `H` toggles writing the heightmap PNG.
+`X` cycles axis by hand if snap misses. `Y` cycles the optional heightmap axis (and turns heightmap export on). `M` toggles writing the heightmap PNG. **H** is reserved for the global control-scheme panel (see [HUD_LEGEND.md](HUD_LEGEND.md)); it never writes a heightmap.
 
 ## Export settings (square POT)
 
@@ -44,7 +44,7 @@ Default bake is a **power-of-two square**, not the ultra-wide native slab. The i
 | Fit | **Pad** | Letterbox / pillarbox the full plane into the square. **Crop** trims to the occupied density AABB first, then pads. |
 | Aspect | **Square** | Advanced: **Native** keeps the extracted slab width×height (old behavior). Size presets apply only to square. |
 
-Formats are unchanged: PNG, density mask, JSON, SVG, optional heightmap (`H` / `Y`). The card lists those names; heightmap stays a key toggle.
+Formats are unchanged: PNG, density mask, JSON, SVG, optional heightmap (`M` / `Y`). The card lists those names; heightmap stays a key toggle.
 
 PNG / mask / SVG / `density_u8` are written at the chosen output size. JSON also records `export_aspect`, `export_fit`, `export_preset`, `source_width`, and `source_height`.
 
@@ -63,7 +63,7 @@ Stem: `exports/pycelium_<YYYYMMDD_HHMMSS>_<axis>_<squash|rich>.*`
 |------|----------|
 | `.png` | Density / biomass view (teal hypha + rust soluble C, same look as the inset) |
 | `_mask.png` | Greyscale density mask (max-normalized) for later texture / material use |
-| `_height.png` | Optional. Greyscale along the chosen domain axis (black↔white). `H` / `Y`. |
+| `_height.png` | Optional. Greyscale along the chosen domain axis (black↔white). `M` / `Y`. |
 | `.json` | `pycelium-slice-v1`: grid meta, axis, thickness, stats, `density_u8`, rich `samples`, plus `export_aspect` / `export_fit` / `export_preset` / source size |
 | `.svg` | Marching-squares contours of high-density regions |
 

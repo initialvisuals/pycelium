@@ -1,0 +1,2 @@
+# cmd.exe double-click needs CRLF or the window can vanish before pause.
+*.bat text eol=crlf

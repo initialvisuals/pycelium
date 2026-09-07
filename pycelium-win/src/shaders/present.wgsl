@@ -50,6 +50,8 @@ struct PresentUniforms {
     nudge_rect: vec4<f32>,
     params_a: vec4<f32>,
     params_b: vec4<f32>,
+    brush_ui: vec4<f32>,
+    brush_hit: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> u: PresentUniforms;
@@ -65,13 +67,13 @@ struct PresentUniforms {
 @group(0) @binding(10) var<storage, read> overlay: array<u32>;
 
 const HELP_COLS: i32 = 26;
-const HELP_ROWS: i32 = 22;
+const HELP_ROWS: i32 = 25;
 const TIP_COLS: i32 = 36;
 const TIP_ROWS: i32 = 8;
-const TIP_BASE: i32 = 572;
+const TIP_BASE: i32 = 650;
 const NUDGE_COLS: i32 = 28;
 const NUDGE_ROWS: i32 = 3;
-const NUDGE_BASE: i32 = 860;
+const NUDGE_BASE: i32 = 938;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -350,6 +352,36 @@ fn label_char(id: i32, slot: i32) -> i32 {
         case 39: { // EXTEND
             switch slot { case 0: { return 5; } case 1: { return 24; } case 2: { return 20; } case 3: { return 5; } case 4: { return 14; } case 5: { return 4; } default: { return -1; } }
         }
+        case 40: { // PION
+            switch slot { case 0: { return 16; } case 1: { return 9; } case 2: { return 15; } case 3: { return 14; } default: { return -1; } }
+        }
+        case 41: { // CORD
+            switch slot { case 0: { return 3; } case 1: { return 15; } case 2: { return 18; } case 3: { return 4; } default: { return -1; } }
+        }
+        case 42: { // SCAV
+            switch slot { case 0: { return 19; } case 1: { return 3; } case 2: { return 1; } case 3: { return 22; } default: { return -1; } }
+        }
+        case 43: { // NITR
+            switch slot { case 0: { return 14; } case 1: { return 9; } case 2: { return 20; } case 3: { return 18; } default: { return -1; } }
+        }
+        case 44: { // MAT
+            switch slot { case 0: { return 13; } case 1: { return 1; } case 2: { return 20; } default: { return -1; } }
+        }
+        case 45: { // THRF
+            switch slot { case 0: { return 20; } case 1: { return 8; } case 2: { return 18; } case 3: { return 6; } default: { return -1; } }
+        }
+        case 46: { // RANG
+            switch slot { case 0: { return 18; } case 1: { return 1; } case 2: { return 14; } case 3: { return 7; } default: { return -1; } }
+        }
+        case 47: { // MINE
+            switch slot { case 0: { return 13; } case 1: { return 9; } case 2: { return 14; } case 3: { return 5; } default: { return -1; } }
+        }
+        case 48: { // SPEC
+            switch slot { case 0: { return 19; } case 1: { return 16; } case 2: { return 5; } case 3: { return 3; } default: { return -1; } }
+        }
+        case 49: { // PAINT
+            switch slot { case 0: { return 16; } case 1: { return 1; } case 2: { return 9; } case 3: { return 14; } case 4: { return 20; } default: { return -1; } }
+        }
         default: { return -1; }
     }
 }
@@ -584,6 +616,37 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
                     let snap = select(0.0, 0.18, fract(capture) > 0.25);
                     col = col + vec3<f32>(1.0, 0.48, 0.08) * (glow + snap);
                     dens = dens + select(0.03, 0.07, face);
+                }
+            }
+            if u.brush_hit.w > 0.5 && u.brush_ui.x > 0.5 {
+                let bc = u.brush_hit.xyz;
+                let voln = max(max(f32(u.width), f32(u.height)), f32(u.depth));
+                let br = max(u.brush_ui.w / max(voln, 1.0), 0.006);
+                let dd = distance(p, bc);
+                if abs(dd - br) < 0.007 {
+                    let si = i32(u.brush_ui.y + 0.5);
+                    var tint = vec3<f32>(0.85, 0.85, 0.80);
+                    if si == 0 { tint = vec3<f32>(0.55, 0.92, 0.82); }
+                    else if si == 1 { tint = vec3<f32>(0.95, 0.72, 0.28); }
+                    else if si == 2 { tint = vec3<f32>(0.78, 0.42, 0.10); }
+                    else if si == 3 { tint = vec3<f32>(0.55, 0.40, 0.85); }
+                    else if si == 4 { tint = vec3<f32>(0.32, 0.70, 0.34); }
+                    else if si == 5 { tint = vec3<f32>(0.90, 0.78, 0.40); }
+                    else if si == 6 { tint = vec3<f32>(0.95, 0.38, 0.42); }
+                    else { tint = vec3<f32>(0.78, 0.84, 0.88); }
+                    if u.brush_ui.x > 1.5 {
+                        let ci = i32(u.brush_ui.z + 0.5);
+                        if ci == 0 { tint = vec3<f32>(0.78, 0.42, 0.10); }
+                        else if ci == 1 { tint = vec3<f32>(0.55, 0.40, 0.85); }
+                        else if ci == 2 { tint = vec3<f32>(0.42, 0.62, 0.88); }
+                        else if ci == 3 { tint = vec3<f32>(0.45, 0.32, 0.18); }
+                        else if ci == 4 { tint = vec3<f32>(0.32, 0.70, 0.34); }
+                        else if ci == 5 { tint = vec3<f32>(0.62, 0.38, 0.16); }
+                        else if ci == 6 { tint = vec3<f32>(0.55, 0.52, 0.22); }
+                        else { tint = vec3<f32>(0.72, 0.22, 0.18); }
+                    }
+                    col = col + tint * 0.85;
+                    dens = dens + 0.045;
                 }
             }
             acc = acc + (1.0 - alpha) * col * dens;
@@ -926,6 +989,76 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             let pa = row_alpha(cursor, y0, y1, density, fade, sel);
             rgb = paint_label_sz(uv, vec2<f32>(0.032, y0 + 0.003), 32 + pi, pa, 0.0096, 0.016, rgb);
         }
+    }
+
+    // Species preset strip + SPEC / PAINT chips (top center).
+    {
+        let sx0 = 0.268;
+        let sy0 = 0.010;
+        let sy1 = 0.078;
+        let cell = 0.042;
+        let mx0 = sx0 + cell * 8.0 + 0.010;
+        let mw = 0.046;
+        let tool = i32(u.brush_ui.x + 0.5);
+        let sel_sp = i32(u.brush_ui.y + 0.5);
+        let cursor = u.hud_ui.xy;
+        let spec_on = tool == 1;
+        let paint_on = tool == 2;
+        let scol = array<vec3<f32>, 8>(
+            vec3<f32>(0.55, 0.92, 0.82),
+            vec3<f32>(0.95, 0.72, 0.28),
+            vec3<f32>(0.78, 0.42, 0.10),
+            vec3<f32>(0.55, 0.40, 0.85),
+            vec3<f32>(0.32, 0.70, 0.34),
+            vec3<f32>(0.90, 0.78, 0.40),
+            vec3<f32>(0.95, 0.38, 0.42),
+            vec3<f32>(0.78, 0.84, 0.88)
+        );
+        for (var i = 0; i < 8; i++) {
+            let x0 = sx0 + cell * f32(i);
+            let x1 = x0 + cell;
+            let hover = cursor.x >= x0 && cursor.x < x1 && cursor.y >= sy0 && cursor.y <= sy1;
+            let sel = i == sel_sp && spec_on;
+            var body = vec3<f32>(0.040, 0.042, 0.046);
+            if sel {
+                body = mix(vec3<f32>(0.06, 0.06, 0.07), scol[i], 0.22);
+            } else if hover {
+                body = vec3<f32>(0.07, 0.072, 0.078);
+            }
+            if uv.x >= x0 && uv.x < x1 && uv.y >= sy0 && uv.y <= sy1 {
+                rgb = mix(rgb, body, 0.88);
+            }
+            let sh = fill_rect(uv, vec2<f32>(x0, sy0) + px() * 2.0, vec2<f32>(x1, sy1) + px() * 2.0);
+            rgb = mix(rgb, vec3<f32>(0.0, 0.0, 0.0), sh * 0.28);
+            rgb = mix(rgb, vec3<f32>(0.90, 0.91, 0.88), thin_frame(uv, vec2<f32>(x0, sy0), vec2<f32>(x1, sy1)) * select(0.45, 1.0, sel));
+            let glyph = swatch_sz(uv, vec2<f32>(x0 + 0.011, sy0 + 0.008), select(0.55, 1.0, sel), scol[i], vec2<f32>(0.020, 0.028));
+            if glyph.x + glyph.y + glyph.z > 0.0 {
+                rgb = glyph;
+            }
+            rgb = paint_label_sz(uv, vec2<f32>(x0 + 0.003, sy0 + 0.042), 40 + i, 0.92, 0.0084, 0.014, rgb);
+        }
+        let spec_r0 = vec2<f32>(mx0, sy0);
+        let spec_r1 = vec2<f32>(mx0 + mw, sy1);
+        let paint_r0 = vec2<f32>(mx0 + mw + 0.004, sy0);
+        let paint_r1 = vec2<f32>(mx0 + mw * 2.0 + 0.004, sy1);
+        let spec_h = cursor.x >= spec_r0.x && cursor.x <= spec_r1.x && cursor.y >= sy0 && cursor.y <= sy1;
+        let paint_h = cursor.x >= paint_r0.x && cursor.x <= paint_r1.x && cursor.y >= sy0 && cursor.y <= sy1;
+        if uv.x >= spec_r0.x && uv.x <= spec_r1.x && uv.y >= sy0 && uv.y <= sy1 {
+            var body = vec3<f32>(0.040, 0.042, 0.046);
+            if spec_on { body = vec3<f32>(0.16, 0.22, 0.20); }
+            else if spec_h { body = vec3<f32>(0.07, 0.072, 0.078); }
+            rgb = mix(rgb, body, 0.88);
+        }
+        if uv.x >= paint_r0.x && uv.x <= paint_r1.x && uv.y >= sy0 && uv.y <= sy1 {
+            var body = vec3<f32>(0.040, 0.042, 0.046);
+            if paint_on { body = vec3<f32>(0.22, 0.14, 0.08); }
+            else if paint_h { body = vec3<f32>(0.07, 0.072, 0.078); }
+            rgb = mix(rgb, body, 0.88);
+        }
+        rgb = mix(rgb, vec3<f32>(0.90, 0.91, 0.88), thin_frame(uv, spec_r0, spec_r1) * select(0.45, 1.0, spec_on));
+        rgb = mix(rgb, vec3<f32>(0.90, 0.91, 0.88), thin_frame(uv, paint_r0, paint_r1) * select(0.45, 1.0, paint_on));
+        rgb = paint_label_sz(uv, vec2<f32>(mx0 + 0.003, sy0 + 0.028), 48, select(0.55, 1.0, spec_on), 0.0080, 0.016, rgb);
+        rgb = paint_label_sz(uv, vec2<f32>(mx0 + mw + 0.005, sy0 + 0.028), 49, select(0.55, 1.0, paint_on), 0.0072, 0.016, rgb);
     }
 
     let help_fade = clamp(u.overlay_ui.x, 0.0, 1.0);

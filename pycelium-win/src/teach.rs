@@ -6,6 +6,9 @@
 //! control has no box (none today on the left HUD), teach cannot fire.
 
 use crate::cutter::{SLIDER_X0, SLIDER_X1, SLIDER_Y0, SLIDER_Y1};
+use crate::species::{
+    paint_mode_rect, species_cell, specimen_mode_rect, strip_hit, StripHit, SPECIES,
+};
 use crate::export_settings::{
     ASPECT_Y0, ASPECT_Y1, CHIP_Y0, CHIP_Y1, FIT_Y0, FIT_Y1, FORMAT_Y0, FORMAT_Y1, HT_Y0, HT_Y1,
     PANEL_X0, PANEL_X1, PANEL_Y1, PRESET_ROW, PRESET_ROWS, PRESET_Y0, SQUARE_PRESETS,
@@ -13,7 +16,7 @@ use crate::export_settings::{
 use crate::hud_font;
 
 pub const HELP_COLS: usize = 26;
-pub const HELP_ROWS: usize = 22;
+pub const HELP_ROWS: usize = 25;
 pub const TIP_COLS: usize = 36;
 pub const TIP_ROWS: usize = 8;
 pub const NUDGE_COLS: usize = 28;
@@ -108,6 +111,18 @@ pub enum HoverId {
     ExportAspect,
     ExportFormat,
     ExportHeightmap,
+    SpeciesPioneer,
+    SpeciesCord,
+    SpeciesScavenger,
+    SpeciesNitro,
+    SpeciesMat,
+    SpeciesThrifty,
+    SpeciesRanger,
+    SpeciesMiner,
+    ToolSpecimen,
+    ToolPaint,
+    BrushRadius,
+    Erase,
 }
 
 #[derive(Clone, Debug)]
@@ -171,6 +186,7 @@ pub enum NudgeKind {
     Thick,
     Zoom,
     Pan,
+    Brush,
 }
 
 impl NudgeKind {
@@ -181,6 +197,7 @@ impl NudgeKind {
             Self::Thick => "; ' THICK  SHIFT COARSE",
             Self::Zoom => ", . ZOOM  SHIFT COARSE",
             Self::Pan => "ARROWS PAN  SHIFT COARSE",
+            Self::Brush => "T TOOL  1-8 SLOT  9/0 R  ALT ERASE",
         }
     }
 
@@ -190,6 +207,7 @@ impl NudgeKind {
             Self::SliceZ => 0.570,
             Self::Thick => 0.612,
             Self::Zoom | Self::Pan => 0.656,
+            Self::Brush => 0.118,
         }
     }
 }
@@ -278,13 +296,16 @@ const SCHEME_ROWS: &[SchemeRow] = &[
     SchemeRow { keys: "H", action: "SCHEME", id: HoverId::Help },
     SchemeRow { keys: "DRAG", action: "ORBIT", id: HoverId::Orbit },
     SchemeRow { keys: "WHEEL", action: "DOLLY", id: HoverId::Dolly },
-    SchemeRow { keys: "CLICK", action: "PICK TIP", id: HoverId::Pick },
+    SchemeRow { keys: "CLICK", action: "PICK / DRAW", id: HoverId::Pick },
+    SchemeRow { keys: "T", action: "SPEC / PAINT", id: HoverId::ToolSpecimen },
+    SchemeRow { keys: "9 0", action: "BRUSH R", id: HoverId::BrushRadius },
+    SchemeRow { keys: "ALT", action: "ERASE", id: HoverId::Erase },
     SchemeRow { keys: "[ ]", action: "SLICE Z", id: HoverId::SliceKeys },
     SchemeRow { keys: "; '", action: "THICK", id: HoverId::ThickKeys },
     SchemeRow { keys: ", .", action: "XY ZOOM", id: HoverId::ZoomKeys },
     SchemeRow { keys: "ARROWS", action: "PAN SLAB", id: HoverId::PanKeys },
     SchemeRow { keys: "SHIFT", action: "COARSE", id: HoverId::Shift },
-    SchemeRow { keys: "1-8", action: "PARAM", id: HoverId::ParamKeys },
+    SchemeRow { keys: "1-8", action: "SLOT", id: HoverId::ParamKeys },
     SchemeRow { keys: "- =", action: "NUDGE", id: HoverId::Nudge },
     SchemeRow { keys: "TAB", action: "DENSITY", id: HoverId::Tab },
     SchemeRow { keys: "E", action: "CAPTURE", id: HoverId::Capture },
@@ -298,6 +319,19 @@ const SCHEME_ROWS: &[SchemeRow] = &[
     SchemeRow { keys: "ENTER", action: "WRITE", id: HoverId::Write },
     SchemeRow { keys: "ESC", action: "LEAVE", id: HoverId::Leave },
 ];
+
+fn species_hover_id(id: u8) -> HoverId {
+    match id % 8 {
+        0 => HoverId::SpeciesPioneer,
+        1 => HoverId::SpeciesCord,
+        2 => HoverId::SpeciesScavenger,
+        3 => HoverId::SpeciesNitro,
+        4 => HoverId::SpeciesMat,
+        5 => HoverId::SpeciesThrifty,
+        6 => HoverId::SpeciesRanger,
+        _ => HoverId::SpeciesMiner,
+    }
+}
 
 pub fn in_rect(uv: (f32, f32), r: [f32; 4]) -> bool {
     uv.0 >= r[0] && uv.0 <= r[2] && uv.1 >= r[1] && uv.1 <= r[3]
@@ -382,6 +416,23 @@ pub fn hit_test(
                 [0.5 * (SLIDER_X0 + SLIDER_X1), 0.5 * (SLIDER_Y0 + SLIDER_Y1)],
             );
         }
+    }
+
+    if let Some(hit) = strip_hit(cursor) {
+        return match hit {
+            StripHit::Species(i) => {
+                let r = species_cell(i);
+                (species_hover_id(i), [r[0], 0.5 * (r[1] + r[3])])
+            }
+            StripHit::SpecimenMode => {
+                let r = specimen_mode_rect();
+                (HoverId::ToolSpecimen, [r[0], 0.5 * (r[1] + r[3])])
+            }
+            StripHit::PaintMode => {
+                let r = paint_mode_rect();
+                (HoverId::ToolPaint, [r[0], 0.5 * (r[1] + r[3])])
+            }
+        };
     }
 
     if cursor.0 >= HUD_X0 && cursor.0 <= HUD_X1 {
@@ -617,7 +668,7 @@ fn tip_text(id: HoverId) -> &'static str {
             "Internal carbon the picked tip is carrying (shown times 100). Extension and branching spend this. A starved tip stops growing even if soil food is nearby, until uptake refills it."
         }
         HoverId::Param | HoverId::ParamKeys => {
-            "Eight left-HUD sliders: chemotropism, nitrotropism, autotropism, persistence, maintenance, enzyme_k, branch cost, extension. Keys 1-8 select. Minus and equals nudge the focused slot. Drag any track to set it and select it."
+            "Eight PARAM sliders. In VIEW, 1-8 select a knob; minus and equals nudge it. Drag any track to set it. In SPECIMEN, 1-8 pick a species; in PAINT they pick a field channel."
         }
         HoverId::ParamChemo => {
             "Chemotropism steers each tip toward soluble carbon, the rust SOL C field. High: tips hunt food plumes and bend hard toward litter. Low: they ignore C gradients and wander or follow persistence, nitrogen, or autotropism instead. Key 1. Drag the track or use minus and equals."
@@ -647,13 +698,13 @@ fn tip_text(id: HoverId) -> &'static str {
             "H toggles this corner control-scheme panel, always, including in capture. It never writes a heightmap. Hover a row here, or a left HUD meter, for a teach callout on a white string."
         }
         HoverId::Orbit => {
-            "Left-drag orbits the camera around the pedon. This is the view, not the fungus. Grabbing a capture slider handle or the export card does not start an orbit."
+            "Left-drag orbits in VIEW. In SPECIMEN or PAINT, right-drag orbits so the left button can stamp. Grabbing a HUD slider, the species strip, or the export card does not start an orbit."
         }
         HoverId::Dolly => {
-            "Mouse wheel moves the eye in and out (dolly). Shift+wheel in capture instead thickens the cutter. Wheel over the export card cycles the square size preset."
+            "Mouse wheel dollies in VIEW. In SPECIMEN or PAINT it changes brush radius instead. Shift+wheel in capture thickens the cutter. Wheel over the export card cycles the square size preset."
         }
         HoverId::Pick => {
-            "Click in the volume to select the nearest live tip. The TIP / LINEAGE / AGE / RESERVE block then tracks that slot. Disabled while capturing so the cutter can keep the mouse."
+            "In VIEW, click the volume to pick the nearest live tip. In SPECIMEN or PAINT, left-drag stamps along the ray into the cube (same midpoint as the capture cutter). Right-drag still orbits. Capture disables pick and stamps."
         }
         HoverId::SliceKeys => {
             "Open bracket and close bracket step the view-slab depth. Shift makes the step coarse (8 voxels). This drives the orange plane and the inset, not the capture cutter."
@@ -721,6 +772,26 @@ fn tip_text(id: HoverId) -> &'static str {
         HoverId::ExportHeightmap => {
             "Click to arm the optional heightmap PNG (same as M). Y still picks the height axis. H never writes a heightmap."
         }
+        HoverId::SpeciesPioneer => SPECIES[0].teach,
+        HoverId::SpeciesCord => SPECIES[1].teach,
+        HoverId::SpeciesScavenger => SPECIES[2].teach,
+        HoverId::SpeciesNitro => SPECIES[3].teach,
+        HoverId::SpeciesMat => SPECIES[4].teach,
+        HoverId::SpeciesThrifty => SPECIES[5].teach,
+        HoverId::SpeciesRanger => SPECIES[6].teach,
+        HoverId::SpeciesMiner => SPECIES[7].teach,
+        HoverId::ToolSpecimen => {
+            "Specimen tool: click-drag inoculates germ tubes of the selected species into the box. Selecting a square also writes that species' eight PARAM biases (global knobs, not per-tip genes yet). Flags=2 marks a painted inoculum. T cycles VIEW / SPECIMEN / PAINT."
+        }
+        HoverId::ToolPaint => {
+            "Paint tool: click-drag writes real GPU field buffers. 1-8 pick the channel: SOL C, SOL N, H2O, ORG, ENZ, WOOD, LITTER, VOID. VOID is a cutout of existing fields, not a new poison buffer. T cycles tools."
+        }
+        HoverId::BrushRadius => {
+            "Brush radius in voxels. Keys 9 and 0 shrink or grow it. Mouse wheel does the same while SPECIMEN or PAINT is armed (in VIEW the wheel still dollies). Shift coarsens the step."
+        }
+        HoverId::Erase => {
+            "Hold Alt to subtract. In SPECIMEN that kills tips of the selected lineage inside the brush. In PAINT it removes the armed channel. VOID always cuts out. Right-drag orbits while a tool is armed."
+        }
     }
 }
 
@@ -753,6 +824,12 @@ mod tests {
         assert_eq!(id, HoverId::ParamExtend);
         let (id, _) = hit_test((0.40, 0.110), false, false, false);
         assert_eq!(id, HoverId::None);
+        let pion = crate::species::species_cell(0);
+        let (id, _) = hit_test((0.5 * (pion[0] + pion[2]), 0.044), false, false, false);
+        assert_eq!(id, HoverId::SpeciesPioneer);
+        let spec = crate::species::specimen_mode_rect();
+        let (id, _) = hit_test((0.5 * (spec[0] + spec[2]), 0.044), false, false, false);
+        assert_eq!(id, HoverId::ToolSpecimen);
     }
 
     #[test]
@@ -785,6 +862,14 @@ mod tests {
         assert!(wrap_text(tip_text(HoverId::Param), TIP_COLS).len() <= TIP_ROWS);
         assert!(wrap_text(tip_text(HoverId::ExportFormat), TIP_COLS).len() <= TIP_ROWS);
         assert!(wrap_text(tip_text(HoverId::ExportHeightmap), TIP_COLS).len() <= TIP_ROWS);
+        assert!(wrap_text(tip_text(HoverId::ToolSpecimen), TIP_COLS).len() <= TIP_ROWS);
+        assert!(wrap_text(tip_text(HoverId::ToolPaint), TIP_COLS).len() <= TIP_ROWS);
+        assert!(wrap_text(tip_text(HoverId::BrushRadius), TIP_COLS).len() <= TIP_ROWS);
+        assert!(wrap_text(tip_text(HoverId::Erase), TIP_COLS).len() <= TIP_ROWS);
+        for s in crate::species::SPECIES {
+            let n = wrap_text(s.teach, TIP_COLS).len();
+            assert!(n <= TIP_ROWS, "{} teach wraps to {n} lines", s.name);
+        }
         for slot in 0..8u32 {
             let id = param_hover(slot);
             let n = wrap_text(tip_text(id), TIP_COLS).len();

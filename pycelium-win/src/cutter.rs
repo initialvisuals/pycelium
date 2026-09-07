@@ -293,6 +293,12 @@ fn axis_component(p: [f32; 3], axis: Axis) -> f32 {
     }
 }
 
+/// Midpoint of the ray–cube segment, in unit-cube space.
+pub fn ray_cube_midpoint(ro: [f32; 3], rd: [f32; 3]) -> Option<[f32; 3]> {
+    let seg = ray_cube_segment(ro, rd)?;
+    Some(segment_midpoint(ro, rd, seg))
+}
+
 fn segment_midpoint(ro: [f32; 3], rd: [f32; 3], seg: (f32, f32)) -> [f32; 3] {
     let t = 0.5 * (seg.0.max(0.0) + seg.1);
     [
@@ -462,6 +468,9 @@ mod tests {
         assert!((seg.0 - 1.0).abs() < 1e-4);
         assert!((seg.1 - 2.0).abs() < 1e-4);
         assert!(ray_cube_segment([-2.0, 2.0, 0.5], [1.0, 0.0, 0.0]).is_none());
+        let mid = ray_cube_midpoint([-1.0, 0.5, 0.5], [1.0, 0.0, 0.0]).unwrap();
+        assert!((mid[0] - 0.5).abs() < 1e-4);
+        assert!((mid[1] - 0.5).abs() < 1e-4);
     }
 
     #[test]

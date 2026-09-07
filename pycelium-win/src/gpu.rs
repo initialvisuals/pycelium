@@ -91,6 +91,8 @@ pub struct MyceliumGpu {
     grow: wgpu::ComputePipeline,
     hud_reduce: wgpu::ComputePipeline,
     pick: wgpu::ComputePipeline,
+    paint: wgpu::ComputePipeline,
+    inoculate: wgpu::ComputePipeline,
     sim_bg: wgpu::BindGroup,
     present_pipeline: wgpu::RenderPipeline,
     present_bg: wgpu::BindGroup,
@@ -373,6 +375,8 @@ impl MyceliumGpu {
             grow: compute("grow"),
             hud_reduce: compute("hud_reduce"),
             pick: compute("pick"),
+            paint: compute("paint"),
+            inoculate: compute("inoculate"),
             sim_bg,
             present_pipeline,
             present_bg,
@@ -436,6 +440,51 @@ impl MyceliumGpu {
         self.uniforms.set_normalized(self.param_slot, t);
     }
 
+    /// GPU stamp: inoculate (mode 1), erase tips (2), paint add (3), paint subtract (4).
+    /// `kill_tips` runs a second erase pass (lineage 0 = any) after a field stamp.
+    pub fn stamp_brush(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        center: [f32; 3],
+        radius: f32,
+        strength: f32,
+        channel: u32,
+        lineage: u32,
+        mode: u32,
+        kill_tips: bool,
+    ) {
+        self.uniforms.brush_x = center[0];
+        self.uniforms.brush_y = center[1];
+        self.uniforms.brush_z = center[2];
+        self.uniforms.brush_radius = radius.max(0.75);
+        self.uniforms.brush_strength = strength.clamp(0.05, 1.5);
+        self.uniforms.brush_channel = channel as f32;
+        self.uniforms.brush_lineage = lineage as f32;
+        self.uniforms.brush_mode = mode as f32;
+        self.uniforms.seed = self.uniforms.seed.wrapping_add(1);
+
+        if mode == 1 || mode == 2 {
+            let zero = 0u32;
+            queue.write_buffer(&self.tel, 12 * 4, bytemuck::bytes_of(&zero));
+            self.dispatch_named(device, queue, "inoculate");
+        }
+        if mode == 3 || mode == 4 {
+            self.dispatch_named(device, queue, "paint");
+            if kill_tips {
+                let prev_lin = self.uniforms.brush_lineage;
+                self.uniforms.brush_mode = 2.0;
+                self.uniforms.brush_lineage = 0.0;
+                let zero = 0u32;
+                queue.write_buffer(&self.tel, 12 * 4, bytemuck::bytes_of(&zero));
+                self.dispatch_named(device, queue, "inoculate");
+                self.uniforms.brush_lineage = prev_lin;
+            }
+        }
+        self.uniforms.brush_mode = 0.0;
+        queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&self.uniforms));
+    }
+
     pub fn upload_brick(&self, queue: &wgpu::Queue, world: &HostWorld) {
         let brick = world.extract_brick(self.width, self.height, self.depth);
         queue.write_buffer(&self.organic, 0, bytemuck::cast_slice(&brick.organic));
@@ -473,6 +522,8 @@ impl MyceliumGpu {
         cutter: [f32; 4],
         export_ui: [f32; 4],
         overlay: &OverlayGpu,
+        brush_ui: [f32; 4],
+        brush_hit: [f32; 4],
     ) {
         let present = PresentUniforms {
             width: self.width,
@@ -523,6 +574,8 @@ impl MyceliumGpu {
             tip_rect: overlay.tip_rect,
             callout: overlay.callout,
             nudge_rect: overlay.nudge_rect,
+            brush_ui,
+            brush_hit,
         };
         queue.write_buffer(&self.present_buf, 0, bytemuck::bytes_of(&present));
         queue.write_buffer(&self.overlay_buf, 0, bytemuck::cast_slice(&overlay.chars));
@@ -596,9 +649,23 @@ impl MyceliumGpu {
             });
             pass.set_bind_group(0, &self.sim_bg, &[]);
             match name {
-                "grow" | "pick" => {
-                    pass.set_pipeline(if name == "grow" { &self.grow } else { &self.pick });
+                "grow" | "pick" | "inoculate" => {
+                    pass.set_pipeline(match name {
+                        "grow" => &self.grow,
+                        "pick" => &self.pick,
+                        _ => &self.inoculate,
+                    });
                     pass.dispatch_workgroups(self.tip_count.div_ceil(TIP_WG), 1, 1);
+                }
+                "paint" => {
+                    pass.set_pipeline(&self.paint);
+                    let r = (self.uniforms.brush_radius.ceil() as u32 + 2).max(2);
+                    let edge = (2 * r + 2).max(8);
+                    pass.dispatch_workgroups(
+                        edge.div_ceil(VOL_X),
+                        edge.div_ceil(VOL_Y),
+                        edge.div_ceil(VOL_Z),
+                    );
                 }
                 other => {
                     let pipe = match other {
@@ -673,6 +740,17 @@ mod shader_tests {
         validator
             .validate(&module)
             .expect("present.wgsl should validate");
+    }
+
+    #[test]
+    fn sim_wgsl_parses_and_validates() {
+        let src = include_str!("shaders/sim.wgsl");
+        let module = naga::front::wgsl::parse_str(src).expect("parse sim.wgsl");
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        );
+        validator.validate(&module).expect("sim.wgsl should validate");
     }
 }
 

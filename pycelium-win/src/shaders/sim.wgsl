@@ -42,6 +42,14 @@ struct Uniforms {
     pick_dy: f32,
     pick_dz: f32,
     pad2: f32,
+    brush_x: f32,
+    brush_y: f32,
+    brush_z: f32,
+    brush_radius: f32,
+    brush_strength: f32,
+    brush_channel: f32,
+    brush_mode: f32,
+    brush_lineage: f32,
 }
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -361,4 +369,163 @@ fn pick(@builtin(global_invocation_id) gid: vec3<u32>) {
     if atomicLoad(&tel[10]) == key {
         atomicStore(&tel[11], id);
     }
+}
+
+// Brush stamps. Mode 1 = inoculate, 2 = erase tips, 3 = paint add, 4 = paint subtract.
+// Paint dispatches a small AABB: gid (0,0,0) is (round(center) - r - 1).
+@compute @workgroup_size(8, 8, 4)
+fn paint(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let mode = u32(u.brush_mode + 0.5);
+    if mode != 3u && mode != 4u {
+        return;
+    }
+    let r = i32(ceil(u.brush_radius)) + 1;
+    let cx = i32(round(u.brush_x));
+    let cy = i32(round(u.brush_y));
+    let cz = i32(round(u.brush_z));
+    let x = cx - r + i32(gid.x);
+    let y = cy - r + i32(gid.y);
+    let z = cz - r + i32(gid.z);
+    if x < 0 || y < 0 || z < 0 {
+        return;
+    }
+    if x >= i32(u.width) || y >= i32(u.height) || z >= i32(u.depth) {
+        return;
+    }
+    let p = vec3<f32>(f32(x) + 0.5, f32(y) + 0.5, f32(z) + 0.5);
+    let center = vec3<f32>(u.brush_x, u.brush_y, u.brush_z);
+    let rad = max(u.brush_radius, 0.75);
+    let d = distance(p, center);
+    if d > rad {
+        return;
+    }
+    let fall = pow(1.0 - d / rad, 1.4);
+    let str = clamp(u.brush_strength, 0.05, 1.5) * fall;
+    let sub = mode == 4u;
+    let ch = u32(u.brush_channel + 0.5) % 8u;
+    let i = idx3(x, y, z);
+
+    if ch == 0u {
+        if sub { soluble_c[i] = max(soluble_c[i] - 0.16 * str, 0.0); }
+        else { soluble_c[i] = soluble_c[i] + 0.14 * str; }
+        return;
+    }
+    if ch == 1u {
+        if sub { soluble_n[i] = max(soluble_n[i] - 0.12 * str, 0.0); }
+        else { soluble_n[i] = soluble_n[i] + 0.10 * str; }
+        return;
+    }
+    if ch == 2u {
+        if sub { moisture[i] = max(moisture[i] - 0.22 * str, 0.02); }
+        else { moisture[i] = min(moisture[i] + 0.20 * str, 0.98); }
+        return;
+    }
+    if ch == 3u {
+        if sub { organic[i] = max(organic[i] - 0.45 * str, 0.0); }
+        else { organic[i] = organic[i] + 0.40 * str; }
+        return;
+    }
+    if ch == 4u {
+        if sub { enzyme[i] = max(enzyme[i] - 0.10 * str, 0.0); }
+        else { enzyme[i] = enzyme[i] + 0.085 * str; }
+        return;
+    }
+    if ch == 5u {
+        if sub {
+            organic[i] = max(organic[i] - 0.80 * str, 0.0);
+            soluble_c[i] = max(soluble_c[i] - 0.08 * str, 0.0);
+        } else {
+            organic[i] = organic[i] + 0.85 * str;
+            soluble_c[i] = soluble_c[i] + 0.07 * str;
+        }
+        return;
+    }
+    if ch == 6u {
+        if sub {
+            organic[i] = max(organic[i] - 0.40 * str, 0.0);
+            soluble_n[i] = max(soluble_n[i] - 0.14 * str, 0.0);
+            soluble_c[i] = max(soluble_c[i] - 0.04 * str, 0.0);
+        } else {
+            organic[i] = organic[i] + 0.38 * str;
+            soluble_n[i] = soluble_n[i] + 0.14 * str;
+            soluble_c[i] = soluble_c[i] + 0.03 * str;
+        }
+        return;
+    }
+    // VOID: always a cutout of existing fields.
+    biomass[i] = max(biomass[i] * (1.0 - 0.88 * str), 0.0);
+    organic[i] = max(organic[i] * (1.0 - 0.80 * str), 0.0);
+    soluble_c[i] = max(soluble_c[i] * (1.0 - 0.80 * str), 0.0);
+    soluble_n[i] = max(soluble_n[i] * (1.0 - 0.80 * str), 0.0);
+    enzyme[i] = max(enzyme[i] * (1.0 - 0.88 * str), 0.0);
+    internal_c[i] = max(internal_c[i] * (1.0 - 0.75 * str), 0.0);
+}
+
+@compute @workgroup_size(64)
+fn inoculate(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let id = gid.x;
+    if id >= u.tip_count {
+        return;
+    }
+    let mode = u32(u.brush_mode + 0.5);
+    let center = vec3<f32>(u.brush_x, u.brush_y, u.brush_z);
+    let rad = max(u.brush_radius, 1.0);
+
+    if mode == 2u {
+        var t = tips[id];
+        if t.state <= 0.0 {
+            return;
+        }
+        if distance(t.pos, center) > rad {
+            return;
+        }
+        let want = u32(u.brush_lineage + 0.5);
+        if want != 0u && t.lineage != want {
+            return;
+        }
+        t.state = 0.0;
+        t.reserve = 0.0;
+        tips[id] = t;
+        return;
+    }
+
+    if mode != 1u {
+        return;
+    }
+    // Parent half only — the upper half is the grow() branch pool.
+    if id >= (u.tip_count / 2u) {
+        return;
+    }
+    if tips[id].state > 0.0 {
+        return;
+    }
+    let cap = max(1u, min(6u, u32(rad / 3.0)));
+    let claimed = atomicAdd(&tel[12], 1u);
+    if claimed >= cap {
+        return;
+    }
+    let h = pcg(id * 747796405u + u.seed + claimed * 17u);
+    let a = f32(h & 1023u) * 0.006135923;
+    let b = f32((h >> 10u) & 1023u) * 0.006135923;
+    let spread = rad * 0.55 * f32((h >> 20u) & 255u) / 255.0;
+    let off = vec3<f32>(sin(a) * cos(b), cos(a) * cos(b), sin(b) * 0.65) * spread;
+    var t = tips[id];
+    var pos = center + off;
+    pos.x = pos.x - f32(u.width) * floor(pos.x / f32(u.width));
+    pos.y = pos.y - f32(u.height) * floor(pos.y / f32(u.height));
+    if pos.x < 0.0 { pos.x = pos.x + f32(u.width); }
+    if pos.y < 0.0 { pos.y = pos.y + f32(u.height); }
+    pos.z = clamp(pos.z, 1.0, f32(u.depth) - 2.0);
+    t.pos = pos;
+    t.dir = safe_norm(off + vec3<f32>(0.12, 0.04, 0.06));
+    if length(t.dir) < 0.1 {
+        t.dir = vec3<f32>(1.0, 0.0, 0.0);
+    }
+    t.age = 0.0;
+    t.reserve = 1.1;
+    t.state = 1.0;
+    t.lineage = max(1u, u32(u.brush_lineage + 0.5));
+    t.parent = 0u;
+    t.flags = 2u;
+    tips[id] = t;
 }

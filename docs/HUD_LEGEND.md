@@ -62,7 +62,13 @@ Click in the volume to pick the nearest live tip. `hud[10]` is the pick distance
 | 0.75 | ice | `AGE` | 5 | tip age |
 | 0.77 | amber | `RESERVE` | 4 | internal reserve × 100 |
 
-After a pick, sparse mode keeps this block readable.
+After a pick, sparse mode keeps this block readable. Painted inocula use lineage 1–8 (the species strip) and `flags = 2`.
+
+## Species strip + paint (top center)
+
+Eight square buttons sit between the left HUD and the slab inset (`docs/PAINT.md`). A colored glyph and a four-letter name mark each starter species. **SPEC** / **PAINT** chips sit to the right of the row.
+
+Selecting a square writes the eight PARAM knobs for that species and arms the specimen brush. Click-drag in the volume inoculates tips (or, in PAINT, writes field buffers). `T` cycles VIEW / SPECIMEN / PAINT. In VIEW, `1–8` still select PARAM rows; in the other tools they select species or paint channel. `9` / `0` (or wheel while armed) change brush radius. Alt subtracts. Hover a square for species-bias teach copy; a toast reports the current tool.
 
 ## Param knobs (compact group, shared frame)
 
@@ -94,6 +100,8 @@ Heightmap PNG write in capture is **M**, not H. **Y** still cycles the heightmap
 ## Inset (right)
 
 The orthogonal slab inset is **not** part of the left HUD. It shows hypha + soluble C in the current Z slab, framed, with zoom/pan.
+
+The species strip sits **above** the inset, left of `x = 0.72`, so it does not fight the left meters or the capture thickness slider.
 
 ## Controls that do not change presets
 

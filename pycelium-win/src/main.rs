@@ -6,6 +6,7 @@ mod gpu;
 mod hud_font;
 mod memory;
 mod model;
+mod species;
 mod teach;
 mod types;
 
@@ -23,11 +24,12 @@ use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
 use crate::config::{Args, LabelDensity, MemoryPlan};
-use crate::cutter::Cutter;
+use crate::cutter::{ray_cube_midpoint, Cutter};
 use crate::export::{apply_export_layout, extract_slice, utc_stamp, write_exports_with_meta};
 use crate::export_settings::ExportSettings;
 use crate::gpu::{GpuDevice, MyceliumGpu};
 use crate::memory::HostWorld;
+use crate::species::{strip_hit, BrushState, PaintChannel, StripHit, ToolMode};
 use crate::teach::{HoverId, HudSlider, NudgeKind, NudgeToast};
 use crate::types::SimUniforms;
 
@@ -84,6 +86,8 @@ struct Runtime {
     last_hover: HoverId,
     nudge: Option<LiveNudge>,
     hud_drag: Option<HudDrag>,
+    brush: BrushState,
+    alt: bool,
 }
 
 struct LiveNudge {
@@ -256,6 +260,8 @@ impl ApplicationHandler<AppAction> for App {
                 last_hover: HoverId::None,
                 nudge: None,
                 hud_drag: None,
+                brush: BrushState::default(),
+                alt: false,
             })));
         });
     }
@@ -286,6 +292,9 @@ impl ApplicationHandler<AppAction> for App {
                     "HUD: FPS, tips, fusions, branches, C:N | bars | then slice Z / thickness / zoom% | selected tip"
                 );
                 println!("H control scheme | hover a meter or scheme row for a teach callout");
+                println!(
+                    "T specimen/paint | click a species square | 1-8 slot | 9/0 brush | Alt erase | right-drag orbit"
+                );
             }
         }
     }
@@ -323,6 +332,10 @@ impl ApplicationHandler<AppAction> for App {
                     apply_hud_slider(rt, drag.slider, rt.cursor.0, &drag.start);
                     rt.window.request_redraw();
                 }
+                if rt.brush.stroking && !rt.cutter.active && rt.hud_drag.is_none() {
+                    try_stamp_brush(rt);
+                    rt.window.request_redraw();
+                }
                 if rt.cutter.active {
                     let axis_n = rt.cutter.axis.size(rt.sim.width, rt.sim.height, rt.sim.depth)
                         as f32;
@@ -345,6 +358,14 @@ impl ApplicationHandler<AppAction> for App {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
+                if button == MouseButton::Right {
+                    rt.orbit.dragging = state == ElementState::Pressed;
+                    rt.orbit.last = None;
+                    if state == ElementState::Released {
+                        rt.brush.stroking = false;
+                    }
+                    return;
+                }
                 if button == MouseButton::Left {
                     let scheme_rect = teach::scheme_rect(rt.export.panel_open && rt.cutter.active);
                     if rt.scheme_visible && teach::in_rect(rt.cursor, scheme_rect) {
@@ -353,6 +374,13 @@ impl ApplicationHandler<AppAction> for App {
                         return;
                     }
                     if state == ElementState::Pressed {
+                        if let Some(hit) = strip_hit(rt.cursor) {
+                            apply_strip_hit(rt, hit);
+                            rt.orbit.dragging = false;
+                            rt.orbit.last = None;
+                            rt.window.request_redraw();
+                            return;
+                        }
                         if let Some(slider) = teach::hud_slider_at(rt.cursor) {
                             let start = match slider {
                                 HudSlider::SliceZ => fmt_slice_z(rt.sim.slice.z),
@@ -440,6 +468,25 @@ impl ApplicationHandler<AppAction> for App {
                         rt.orbit.last = None;
                         return;
                     }
+                    let tool_draw = !rt.cutter.active
+                        && rt.brush.mode != ToolMode::View
+                        && rt.hud_drag.is_none();
+                    if tool_draw {
+                        if state == ElementState::Pressed {
+                            rt.brush.stroking = true;
+                            rt.brush.last_stamp = None;
+                            rt.orbit.dragging = false;
+                            rt.orbit.last = None;
+                            try_stamp_brush(rt);
+                        } else {
+                            rt.brush.stroking = false;
+                            rt.brush.last_stamp = None;
+                            rt.orbit.dragging = false;
+                            rt.orbit.last = None;
+                        }
+                        rt.window.request_redraw();
+                        return;
+                    }
                     rt.orbit.dragging = state == ElementState::Pressed;
                     rt.orbit.last = None;
                     if state == ElementState::Released && !rt.cutter.active {
@@ -460,6 +507,13 @@ impl ApplicationHandler<AppAction> for App {
                     let axis_n = rt.cutter.axis.size(rt.sim.width, rt.sim.height, rt.sim.depth)
                         as f32;
                     rt.cutter.nudge_half(steps * if rt.shift { 2.0 } else { 1.0 }, axis_n);
+                } else if !rt.cutter.active
+                    && (rt.brush.mode != ToolMode::View || strip_hit(rt.cursor).is_some())
+                {
+                    let step = if rt.shift { 2.4 } else { 0.8 };
+                    rt.brush.nudge_radius(steps * step);
+                    fire_brush_toast(rt);
+                    rt.window.request_redraw();
                 } else {
                     rt.orbit.radius = (rt.orbit.radius - steps * 0.12).clamp(0.55, 4.5);
                 }
@@ -476,6 +530,15 @@ impl ApplicationHandler<AppAction> for App {
             } => {
                 if matches!(logical_key, Key::Named(NamedKey::Shift)) {
                     rt.shift = state == ElementState::Pressed;
+                    return;
+                }
+                if matches!(logical_key, Key::Named(NamedKey::Alt)) {
+                    rt.alt = state == ElementState::Pressed;
+                    rt.brush.erase = rt.alt;
+                    if rt.brush.mode != ToolMode::View {
+                        fire_brush_toast(rt);
+                        rt.window.request_redraw();
+                    }
                     return;
                 }
                 if state != ElementState::Pressed {
@@ -582,6 +645,17 @@ impl ApplicationHandler<AppAction> for App {
                     rt.window.request_redraw();
                     return;
                 }
+                let radius_nudge = match &logical_key {
+                    Key::Character(c) if c == "9" => Some(if rt.shift { -2.4 } else { -0.8 }),
+                    Key::Character(c) if c == "0" => Some(if rt.shift { 2.4 } else { 0.8 }),
+                    _ => None,
+                };
+                if let Some(delta) = radius_nudge {
+                    rt.brush.nudge_radius(delta);
+                    fire_brush_toast(rt);
+                    rt.window.request_redraw();
+                    return;
+                }
                 if repeat {
                     return;
                 }
@@ -675,6 +749,12 @@ impl ApplicationHandler<AppAction> for App {
                         rt.cutter.export_heightmap = true;
                         println!("{}", rt.cutter.describe());
                     }
+                    Key::Character(c) if c.eq_ignore_ascii_case("t") && !rt.cutter.active => {
+                        rt.brush.cycle_mode();
+                        fire_brush_toast(rt);
+                        println!("tool {}", rt.brush.mode.as_str());
+                        rt.window.request_redraw();
+                    }
                     Key::Named(NamedKey::Space) => rt.paused = !rt.paused,
                     Key::Character(c) if c.eq_ignore_ascii_case("r") => {
                         rt.sim.reseed(&rt.gpu.queue, &rt.world);
@@ -689,23 +769,42 @@ impl ApplicationHandler<AppAction> for App {
                     Key::Character(c) => {
                         if let Some(d) = c.chars().next().and_then(|ch| ch.to_digit(10)) {
                             if (1..=8).contains(&d) {
-                                rt.sim.param_slot = d - 1;
-                                let v = fmt_param(
-                                    rt.sim.param_slot,
-                                    rt.sim.uniforms.param_value(rt.sim.param_slot),
-                                );
-                                fire_nudge(
-                                    rt,
-                                    NudgeKind::Param,
-                                    param_title(rt.sim.param_slot),
-                                    v.clone(),
-                                    v.clone(),
-                                );
-                                println!(
-                                    "param {} = {:.4}",
-                                    SimUniforms::param_name(rt.sim.param_slot),
-                                    rt.sim.uniforms.param_value(rt.sim.param_slot)
-                                );
+                                let slot = (d - 1) as u8;
+                                match rt.brush.mode {
+                                    ToolMode::Specimen => {
+                                        rt.brush.select_species(slot, &mut rt.sim.uniforms);
+                                        fire_brush_toast(rt);
+                                        println!(
+                                            "species {} lineage {}",
+                                            rt.brush.species_preset().name,
+                                            rt.brush.species_preset().lineage
+                                        );
+                                    }
+                                    ToolMode::Paint => {
+                                        rt.brush.select_channel(PaintChannel::from_index(slot));
+                                        fire_brush_toast(rt);
+                                        println!("paint {}", rt.brush.channel.name());
+                                    }
+                                    ToolMode::View => {
+                                        rt.sim.param_slot = slot as u32;
+                                        let v = fmt_param(
+                                            rt.sim.param_slot,
+                                            rt.sim.uniforms.param_value(rt.sim.param_slot),
+                                        );
+                                        fire_nudge(
+                                            rt,
+                                            NudgeKind::Param,
+                                            param_title(rt.sim.param_slot),
+                                            v.clone(),
+                                            v.clone(),
+                                        );
+                                        println!(
+                                            "param {} = {:.4}",
+                                            SimUniforms::param_name(rt.sim.param_slot),
+                                            rt.sim.uniforms.param_value(rt.sim.param_slot)
+                                        );
+                                    }
+                                }
                                 rt.window.request_redraw();
                             }
                         }
@@ -811,6 +910,7 @@ impl ApplicationHandler<AppAction> for App {
                             rt.tip_fade,
                             toast.as_ref(),
                         );
+                        let brush_hit = brush_hit_vec(rt, eye, target);
                         rt.sim.render(
                             &rt.gpu.device,
                             &rt.gpu.queue,
@@ -827,6 +927,8 @@ impl ApplicationHandler<AppAction> for App {
                             rt.cutter.present_vec(),
                             rt.export.present_vec(),
                             &overlay,
+                            rt.brush.present_vec(),
+                            brush_hit,
                         );
                         rt.window.pre_present_notify();
                         rt.gpu.queue.present(frame);
@@ -864,7 +966,13 @@ impl ApplicationHandler<AppAction> for App {
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(rt) = &self.runtime {
-            if !rt.paused || rt.nudge.is_some() || rt.scheme_fade > 0.01 || rt.tip_fade > 0.01 {
+            if !rt.paused
+                || rt.nudge.is_some()
+                || rt.scheme_fade > 0.01
+                || rt.tip_fade > 0.01
+                || rt.brush.stroking
+                || rt.brush.mode != crate::species::ToolMode::View
+            {
                 rt.window.request_redraw();
             }
         }
@@ -1017,6 +1125,117 @@ fn apply_hud_slider(rt: &mut Runtime, slider: HudSlider, x: f32, start: &str) {
                 fmt_param(rt.sim.param_slot, rt.sim.uniforms.param_value(rt.sim.param_slot)),
             );
         }
+    }
+}
+
+fn apply_strip_hit(rt: &mut Runtime, hit: StripHit) {
+    match hit {
+        StripHit::Species(id) => {
+            rt.brush.select_species(id, &mut rt.sim.uniforms);
+            fire_brush_toast(rt);
+            println!(
+                "species {} lineage {}",
+                rt.brush.species_preset().name,
+                rt.brush.species_preset().lineage
+            );
+        }
+        StripHit::SpecimenMode => {
+            rt.brush.mode = ToolMode::Specimen;
+            rt.brush.apply_species(&mut rt.sim.uniforms);
+            rt.brush.stroking = false;
+            rt.brush.last_stamp = None;
+            fire_brush_toast(rt);
+        }
+        StripHit::PaintMode => {
+            rt.brush.mode = ToolMode::Paint;
+            rt.brush.stroking = false;
+            rt.brush.last_stamp = None;
+            fire_brush_toast(rt);
+        }
+    }
+}
+
+fn fire_brush_toast(rt: &mut Runtime) {
+    fire_nudge(
+        rt,
+        NudgeKind::Brush,
+        rt.brush.toast_title(),
+        rt.brush.toast_value(),
+        rt.brush.toast_value(),
+    );
+}
+
+fn try_stamp_brush(rt: &mut Runtime) {
+    if rt.cutter.active || rt.brush.mode == ToolMode::View {
+        return;
+    }
+    if teach::hud_slider_at(rt.cursor).is_some() || strip_hit(rt.cursor).is_some() {
+        return;
+    }
+    if rt.scheme_visible && teach::in_rect(rt.cursor, teach::scheme_rect(false)) {
+        return;
+    }
+    let (eye, target) = rt.orbit.eye_target();
+    let rd = click_dir(rt.cursor, rt.config.width, rt.config.height, eye, target);
+    let Some(mid) = ray_cube_midpoint(eye, rd) else {
+        return;
+    };
+    let vol = [
+        rt.sim.width as f32,
+        rt.sim.height as f32,
+        rt.sim.depth as f32,
+    ];
+    let center = [mid[0] * vol[0], mid[1] * vol[1], mid[2] * vol[2]];
+    if !rt.brush.should_stamp(center) {
+        return;
+    }
+    rt.brush.last_stamp = Some(center);
+    rt.brush.erase = rt.alt;
+    let lineage = rt.brush.species_preset().lineage;
+    match rt.brush.mode {
+        ToolMode::Specimen => {
+            let mode = if rt.brush.erase { 2 } else { 1 };
+            rt.sim.stamp_brush(
+                &rt.gpu.device,
+                &rt.gpu.queue,
+                center,
+                rt.brush.radius,
+                rt.brush.strength,
+                0,
+                lineage,
+                mode,
+                false,
+            );
+        }
+        ToolMode::Paint => {
+            let subtract = rt.brush.erase || rt.brush.channel == PaintChannel::Void;
+            let mode = if subtract { 4 } else { 3 };
+            let kill = rt.brush.channel == PaintChannel::Void;
+            rt.sim.stamp_brush(
+                &rt.gpu.device,
+                &rt.gpu.queue,
+                center,
+                rt.brush.radius,
+                rt.brush.strength,
+                rt.brush.channel.index() as u32,
+                0,
+                mode,
+                kill,
+            );
+        }
+        ToolMode::View => {}
+    }
+    fire_brush_toast(rt);
+}
+
+fn brush_hit_vec(rt: &Runtime, eye: [f32; 3], target: [f32; 3]) -> [f32; 4] {
+    if rt.brush.mode == ToolMode::View || rt.cutter.active {
+        return [0.0, 0.0, 0.0, 0.0];
+    }
+    let rd = click_dir(rt.cursor, rt.config.width, rt.config.height, eye, target);
+    match ray_cube_midpoint(eye, rd) {
+        Some(p) => [p[0], p[1], p[2], 1.0],
+        None => [0.0, 0.0, 0.0, 0.0],
     }
 }
 

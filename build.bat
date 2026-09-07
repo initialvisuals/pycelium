@@ -87,18 +87,16 @@ pause
 exit /b %RC%
 
 :tee_cargo
-REM Live cargo on the console, same text appended to build.log.
-REM *>&1 is PowerShell redirect so cmd.exe does not steal 2>&1.
-REM No parenthesized blocks here: %ERRORLEVEL% would expand too early.
-where powershell.exe >nul 2>&1
-if not errorlevel 1 goto :tee_ps
-echo powershell.exe not found; cargo output goes to build.log, then typed back.
-cargo build --release -p pycelium-win >> "%LOG%" 2>&1
+REM Cargo writes compile progress to stderr. Do not pipe through PowerShell
+REM Tee-Object: it wraps stderr as NativeCommandError / RemoteException and
+REM paints it red even when cargo exits 0 (Result: OK, fresh pycelium-win.exe).
+REM cmd-native tee: merge streams into a temp, type to the console, append
+REM to build.log. No parenthesized blocks: %ERRORLEVEL% would expand too early.
+if not defined TEMP set "TEMP=%~dp0"
+set "TEE_TMP=%TEMP%\pycelium-build-%RANDOM%%RANDOM%.tmp"
+cargo build --release -p pycelium-win > "%TEE_TMP%" 2>&1
 set "TEE_RC=%ERRORLEVEL%"
-echo ---- build.log ----
-type "%LOG%"
+type "%TEE_TMP%"
+type "%TEE_TMP%" >> "%LOG%"
+del /q "%TEE_TMP%" >nul 2>&1
 exit /b %TEE_RC%
-
-:tee_ps
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& cargo build --release -p pycelium-win *>&1 | Tee-Object -FilePath 'build.log' -Append; if ($null -ne $global:LASTEXITCODE) { exit [int]$global:LASTEXITCODE }; exit 0"
-exit /b %ERRORLEVEL%

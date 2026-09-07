@@ -33,6 +33,8 @@ cargo run -p pycelium-win --release -- --preset demo
 # --bench N is headless and does not open the HUD
 ```
 
+Windows: double-click `build.bat` (release binary at `target\release\pycelium-win.exe`). Double-click `run.bat` to build then open the GPU window (`run.bat demo` / `performant` / `beast`). If the console closes, open `build.log` in the repo root.
+
 ### Experiment log
 
 Logged trials (presets, `--drift` / `--bench`, HUD bake metrics) live in
